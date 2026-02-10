@@ -6,7 +6,7 @@ import QRCode from 'qrcode';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { auth, googleProvider } from '../lib/firebase';
-import { signInWithPopup, signOut as firebaseSignOut, onAuthStateChanged, User } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect, signOut as firebaseSignOut, onAuthStateChanged, User } from 'firebase/auth';
 
 type Tab = 'mouse' | 'keys' | 'draw' | 'macro' | 'media' | 'monitor' | 'mirror' | 'num' | 'power' | 'sync' | 'config';
 
@@ -498,7 +498,13 @@ export default function Home() {
     return `${m}分 ${s}秒`;
   };
 
-  const handleSignIn = () => signInWithPopup(auth, googleProvider);
+  const handleSignIn = () => {
+    if (isMobile) {
+      signInWithRedirect(auth, googleProvider);
+    } else {
+      signInWithPopup(auth, googleProvider);
+    }
+  };
   const handleSignOut = () => firebaseSignOut(auth);
 
   if (authLoading) return <div className="min-h-screen flex items-center justify-center bg-gray-50 font-black text-emerald-500 animate-pulse">RemoteHub...</div>;
@@ -537,19 +543,18 @@ export default function Home() {
             textAlign: 'center'
           }}
         >
-          <div style={{
-            width: '80px',
-            height: '80px',
-            background: '#10b981',
-            borderRadius: '24px',
-            margin: '0 auto 32px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 12px 24px -8px rgba(16,185,129,0.5)'
-          }}>
-            <span style={{ fontSize: '40px', color: 'white', fontWeight: 900, fontStyle: 'italic', letterSpacing: '-0.05em' }}>R</span>
-          </div>
+          <img
+            src="/icon.png"
+            style={{
+              width: '100px',
+              height: '100px',
+              borderRadius: '28px',
+              margin: '0 auto 32px',
+              boxShadow: '0 12px 30px -10px rgba(16,185,129,0.4)',
+              objectFit: 'cover'
+            }}
+            alt="RemoteHub Logo"
+          />
 
           <h1 style={{ fontSize: '32px', fontWeight: 900, color: '#0f172a', marginBottom: '8px', letterSpacing: '-0.03em' }}>RemoteHub</h1>
           <p style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 700, marginBottom: '40px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Unified Remote Control</p>
@@ -615,7 +620,17 @@ export default function Home() {
 
           <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 32px', background: '#fff', borderRadius: '24px', boxShadow: '0 4px 20px rgba(0,0,0,0.03)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-              <div style={{ width: '48px', height: '48px', background: 'linear-gradient(135deg, #10b981, #059669)', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '24px', fontWeight: 900 }}>R</div>
+              <img
+                src="/icon.png"
+                style={{
+                  width: '52px',
+                  height: '52px',
+                  borderRadius: '14px',
+                  boxShadow: '0 4px 12px rgba(16,185,129,0.2)',
+                  objectFit: 'cover'
+                }}
+                alt="R"
+              />
               <div>
                 <h1 style={{ fontSize: '22px', fontWeight: 900, color: '#0f172a' }}>RemoteHub <span style={{ color: '#10b981', fontSize: '13px', background: '#dcfce7', padding: '3px 8px', borderRadius: '6px', marginLeft: '6px' }}>PRO</span></h1>
                 <div style={{ display: 'flex', gap: '12px', fontSize: '12px', color: '#64748b', fontWeight: 600, marginTop: '2px' }}>
