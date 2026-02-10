@@ -900,7 +900,7 @@ export default function Home() {
                 <div className="card" style={{ padding: 24 }}>
                   <input
                     type="text" className="input" placeholder="000000" value={passwordInput} maxLength={6}
-                    onChange={e => setPasswordInput(e.target.value.replace(/\D/g, ''))}
+                    onChange={e => setPasswordInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
                     style={{ height: 72, fontSize: 32, textAlign: 'center', letterSpacing: 8, fontWeight: 900, marginBottom: 16 }}
                   />
                   <button onClick={loginWithPassword} className="btn btn-primary" style={{ width: '100%', height: 56 }}>接続する</button>
