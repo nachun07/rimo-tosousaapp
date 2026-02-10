@@ -149,6 +149,7 @@ const ioHandler = (req: any, res: any) => {
           case 'mute': exec('osascript -e "set volume with output muted"'); break;
           case 'brightness-up': exec('osascript -e "tell application \"System Events\" to repeat 2 times" -e "key code 144" -e "end repeat"'); break;
           case 'brightness-down': exec('osascript -e "tell application \"System Events\" to repeat 2 times" -e "key code 145" -e "end repeat"'); break;
+          case 'display-settings': exec('open "x-apple.systempreferences:com.apple.Displays-Settings.extension"'); break;
         }
       });
 

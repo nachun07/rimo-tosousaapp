@@ -41,6 +41,9 @@ export default function Home() {
   const [connectedMobiles, setConnectedMobiles] = useState<any[]>([]);
   const [mobileScreenData, setMobileScreenData] = useState<string | null>(null);
   const [isSharingMobileScreen, setIsSharingMobileScreen] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [appSearch, setAppSearch] = useState('');
+  const [touchIndicator, setTouchIndicator] = useState<{ x: number, y: number } | null>(null);
 
   const last = useRef({ x: 0, y: 0 });
   const fingers = useRef(0);
@@ -409,6 +412,13 @@ export default function Home() {
     const dy = e.touches[0].clientY - last.current.y;
     touchData.current.moved += Math.sqrt(dx * dx + dy * dy);
 
+    // 指の位置を記録
+    const rect = e.currentTarget.getBoundingClientRect();
+    setTouchIndicator({
+      x: e.touches[0].clientX - rect.left,
+      y: e.touches[0].clientY - rect.top
+    });
+
     if (tab === 'draw') {
       socket.emit('mouse-drag', { dx, dy, sensitivity: sens });
     } else if (e.touches.length === 1 && !scroll) {
@@ -447,6 +457,7 @@ export default function Home() {
     }
     setActive(false);
     setScroll(false);
+    setTouchIndicator(null);
   };
 
   const showHint = (msg: string) => {
@@ -588,96 +599,171 @@ export default function Home() {
   // PC Screen
   if (!isMobile) {
     return (
-      <main style={{ minHeight: '100vh', padding: '40px', background: '#f0f2f5', fontFamily: "'Inter', sans-serif" }}>
-        <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-          <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' }}>
+      <main style={{ minHeight: '100vh', padding: '40px', background: '#f8fafc', color: '#1e293b', fontFamily: "'Inter', sans-serif" }}>
+        <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
+          <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '48px', padding: '24px', background: '#fff', borderRadius: '24px', boxShadow: '0 4px 20px rgba(0,0,0,0.03)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-              <div style={{ width: '48px', height: '48px', background: '#10b981', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '24px', fontWeight: 900 }}>R</div>
+              <div style={{ width: '56px', height: '56px', background: 'linear-gradient(135deg, #10b981, #059669)', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '28px', fontWeight: 900, boxShadow: '0 8px 16px -4px rgba(16,185,129,0.4)' }}>R</div>
               <div>
-                <h1 style={{ fontSize: '24px', fontWeight: 800, color: '#1e293b' }}>RemoteHub Dashboard</h1>
-                <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                  <div style={{ padding: '4px 12px', background: '#dcfce7', color: '#166534', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>Online</div>
-                  <div style={{ fontSize: '12px', color: '#64748b' }}>📡 {ipAddress}</div>
+                <h1 style={{ fontSize: '26px', fontWeight: 900, color: '#0f172a', letterSpacing: '-0.02em' }}>RemoteHub <span style={{ color: '#10b981', fontSize: '14px', verticalAlign: 'middle', background: '#dcfce7', padding: '4px 10px', borderRadius: '8px', marginLeft: '8px' }}>PRO</span></h1>
+                <div style={{ display: 'flex', gap: '16px', alignItems: 'center', marginTop: '4px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#64748b', fontWeight: 600 }}>
+                    <span style={{ width: '8px', height: '8px', background: '#10b981', borderRadius: '50%' }} />
+                    Server Active
+                  </div>
+                  <div style={{ fontSize: '13px', color: '#64748b', fontWeight: 600 }}>🌍 {ipAddress}</div>
                 </div>
               </div>
             </div>
-            <button onClick={handleSignOut} style={{ background: '#f1f5f9', border: 'none', padding: '10px 20px', borderRadius: '12px', color: '#64748b', fontWeight: 700, cursor: 'pointer' }}>ログアウト</button>
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button
+                onClick={() => window.open(window.location.origin, '_blank')}
+                style={{ background: '#f1f5f9', border: 'none', padding: '12px 24px', borderRadius: '14px', color: '#475569', fontWeight: 700, cursor: 'pointer', transition: '0.2s' }}
+              >
+                新規ウィンドウ
+              </button>
+              <button
+                onClick={handleSignOut}
+                style={{ background: '#1e293b', border: 'none', padding: '12px 24px', borderRadius: '14px', color: '#fff', fontWeight: 700, cursor: 'pointer', transition: '0.2s', boxShadow: '0 4px 12px rgba(30,41,59,0.2)' }}
+              >
+                サインアウト
+              </button>
+            </div>
           </header>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '32px' }}>
-            {/* 左: 接続待機エリア */}
-            <div className="card" style={{ padding: '40px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '32px' }}>
-              <h2 style={{ fontSize: '18px', fontWeight: 800, color: '#1e293b' }}>新しいデバイスを接続</h2>
-              <div style={{ margin: '0 auto', padding: '16px', background: '#fff', borderRadius: '24px', border: '1px solid #f1f5f9' }}>
-                {qrCode ? (
-                  <img src={qrCode} style={{ width: '240px', height: '240px', borderRadius: '16px' }} alt="QR" />
-                ) : <div style={{ width: '240px', height: '240px', background: '#f8fafc', borderRadius: '16px' }} />}
+          <div style={{ display: 'grid', gridTemplateColumns: '400px 1fr', gap: '32px', alignItems: 'start' }}>
+            {/* 左: 接続制御エリア */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+              <div className="card" style={{ padding: '40px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '32px', border: 'none', boxShadow: '0 10px 30px rgba(0,0,0,0.04)' }}>
+                <div>
+                  <h2 style={{ fontSize: '20px', fontWeight: 800, color: '#0f172a', marginBottom: '8px' }}>デバイスをペアリング</h2>
+                  <p style={{ fontSize: '14px', color: '#64748b' }}>スマホでスキャンして接続を開始します</p>
+                </div>
+
+                <div style={{ position: 'relative', margin: '0 auto', padding: '20px', background: '#fff', borderRadius: '32px', border: '2px solid #f1f5f9' }}>
+                  {qrCode ? (
+                    <img src={qrCode} style={{ width: '260px', height: '260px', borderRadius: '20px' }} alt="QR" />
+                  ) : (
+                    <div style={{ width: '260px', height: '260px', background: '#f8fafc', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <div className="animate-spin" style={{ width: '40px', height: '40px', border: '4px solid #f1f5f9', borderTopColor: '#10b981', borderRadius: '50%' }} />
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ padding: '24px', background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)', borderRadius: '28px', border: '1px solid #bbf7d0' }}>
+                  <p style={{ fontSize: '12px', fontWeight: 800, color: '#166534', marginBottom: '8px', letterSpacing: '0.1em' }}>OTP PASSWORD</p>
+                  <div style={{ fontSize: '56px', fontWeight: 900, color: '#064e3b', letterSpacing: '8px', fontFamily: 'monospace' }}>{tempPassword}</div>
+                </div>
+
+                <button
+                  onClick={refresh}
+                  className="btn btn-primary"
+                  style={{ height: '64px', borderRadius: '20px', fontSize: '16px', background: '#10b981' }}
+                >
+                  新しいパスワードを発行
+                </button>
               </div>
-              <div style={{ padding: '24px', background: '#f0fdf4', borderRadius: '24px', border: '2px solid #10b981' }}>
-                <p style={{ fontSize: '11px', fontWeight: 800, color: '#059669', marginBottom: '8px', letterSpacing: '0.1em' }}>OTP PASSWORD</p>
-                <div style={{ fontSize: '48px', fontWeight: 900, color: '#064e3b', letterSpacing: '8px' }}>{tempPassword}</div>
+
+              <div className="card" style={{ padding: '24px', background: '#1e293b', color: '#fff', border: 'none' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: 800, color: '#94a3b8', marginBottom: '16px', letterSpacing: '0.05em' }}>PC SYSTEM STATS</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <div style={{ padding: '20px', background: 'rgba(255,255,255,0.05)', borderRadius: '20px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#10b981', marginBottom: '4px' }}>CPU</div>
+                    <div style={{ fontSize: '28px', fontWeight: 900 }}>{stats.cpu}<span style={{ fontSize: '14px', marginLeft: '4px' }}>%</span></div>
+                  </div>
+                  <div style={{ padding: '20px', background: 'rgba(255,255,255,0.05)', borderRadius: '20px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: '#3b82f6', marginBottom: '4px' }}>RAM</div>
+                    <div style={{ fontSize: '28px', fontWeight: 900 }}>{stats.mem}<span style={{ fontSize: '14px', marginLeft: '4px' }}>%</span></div>
+                  </div>
+                </div>
               </div>
-              <button onClick={refresh} className="btn btn-primary" style={{ height: '56px' }}>パスワードを更新</button>
             </div>
 
             {/* 右: スマホ管理・ミラーリングエリア */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
               {connectedMobiles.length > 0 ? (
                 connectedMobiles.map(m => (
-                  <div key={m.id} className="card" style={{ padding: '32px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                  <div key={m.id} className="card" style={{ padding: '32px', display: 'flex', flexDirection: 'column', gap: '32px', border: 'none', boxShadow: '0 10px 30px rgba(0,0,0,0.04)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <h3 style={{ fontSize: '18px', fontWeight: 800 }}>📱 Smartphone (Active)</h3>
-                      <div style={{ padding: '6px 16px', background: '#f1f5f9', borderRadius: '20px', fontSize: '12px', fontWeight: 700 }}>
-                        🔋 {m.battery || '?'}% {m.charging ? '⚡' : ''}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                        <div style={{ width: '48px', height: '48px', background: '#f1f5f9', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px' }}>📱</div>
+                        <div>
+                          <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#0f172a' }}>Smartphone</h3>
+                          <p style={{ fontSize: '12px', color: '#64748b', fontWeight: 600 }}>Connected since {getConnectionDuration()}</p>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '12px' }}>
+                        <div style={{ padding: '8px 16px', background: m.battery && m.battery < 20 ? '#fee2e2' : '#f1f5f9', color: m.battery && m.battery < 20 ? '#ef4444' : '#475569', borderRadius: '12px', fontSize: '13px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '16px' }}>{m.charging ? '⚡' : '🔋'}</span>
+                          {m.battery || '?'}%
+                        </div>
+                        <div style={{ padding: '8px 16px', background: '#dcfce7', color: '#166534', borderRadius: '12px', fontSize: '13px', fontWeight: 800 }}>ACTIVE</div>
                       </div>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(240px, 280px) 1fr', gap: '24px' }}>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '320px 1fr', gap: '40px' }}>
                       <div
-                        style={{ aspectRatio: '9/19', background: '#000', borderRadius: '32px', border: '8px solid #1e293b', overflow: 'hidden', position: 'relative', cursor: 'crosshair' }}
+                        style={{
+                          aspectRatio: '9/19',
+                          background: '#000',
+                          borderRadius: '40px',
+                          border: '12px solid #0f172a',
+                          overflow: 'hidden',
+                          position: 'relative',
+                          cursor: 'crosshair',
+                          boxShadow: '0 20px 40px -10px rgba(0,0,0,0.3)'
+                        }}
                         onClick={handleRemoteMobileInput}
                       >
                         {mobileScreenData ? (
                           <img src={mobileScreenData} style={{ width: '100%', height: '100%', objectFit: 'contain' }} alt="Mobile Screen" />
                         ) : (
-                          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#64748b', gap: '16px', padding: '20px', textAlign: 'center' }}>
-                            <span style={{ fontSize: '32px' }}>📡</span>
-                            <p style={{ fontSize: '12px', fontWeight: 600 }}>スマホの「画面共有」をオンにすると表示されます</p>
+                          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#64748b', gap: '20px', padding: '32px', textAlign: 'center' }}>
+                            <div className="animate-pulse" style={{ fontSize: '48px' }}>📡</div>
+                            <div>
+                              <p style={{ fontSize: '14px', fontWeight: 800, color: '#94a3b8', marginBottom: '8px' }}>画面待機中</p>
+                              <p style={{ fontSize: '11px', color: '#64748b', lineHeight: 1.5 }}>端末で「画面共有」をオンにしてください</p>
+                            </div>
                           </div>
                         )}
-                        <div style={{ position: 'absolute', top: '16px', left: '16px', background: 'rgba(0,0,0,0.6)', padding: '6px 12px', borderRadius: '8px', color: '#fff', fontSize: '10px', fontWeight: 800 }}>REMOTE VIEW</div>
+                        <div style={{ position: 'absolute', top: '20px', left: '20px', background: 'rgba(16,185,129,0.9)', padding: '6px 12px', borderRadius: '8px', color: '#fff', fontSize: '10px', fontWeight: 900, backdropFilter: 'blur(4px)' }}>REMOTE VIEW</div>
                       </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', justifyContent: 'center' }}>
-                        <button className="btn btn-secondary" style={{ height: '56px' }} onClick={() => socket?.emit('pc-to-mobile', { type: 'ping' })}>🔔 呼び出し音</button>
-                        <button className="btn btn-secondary" style={{ height: '56px' }} onClick={() => socket?.emit('pc-to-mobile', { type: 'vibrate' })}>📳 振動</button>
-                        <button className="btn btn-secondary" style={{ height: '56px' }} onClick={() => {
-                          const msg = prompt("メッセージ:", "こんにちは");
-                          if (msg) socket?.emit('pc-to-mobile', { type: 'alert', msg });
-                        }}>💬 通知送信</button>
-                        <button className="btn btn-primary" style={{ height: '56px' }} onClick={() => {
-                          const url = prompt("送信URL:", "https://www.google.com");
-                          if (url) socket?.emit('pc-to-mobile', { type: 'open-url', url });
-                        }}>🔗 URL送信</button>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                        <h4 style={{ fontSize: '13px', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.05em', marginBottom: '8px' }}>QUICK ACTIONS</h4>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                          <button className="btn btn-secondary" style={{ height: '72px', fontSize: '15px', borderRadius: '20px' }} onClick={() => socket?.emit('pc-to-mobile', { type: 'ping' })}>🔔 呼び出し</button>
+                          <button className="btn btn-secondary" style={{ height: '72px', fontSize: '15px', borderRadius: '20px' }} onClick={() => socket?.emit('pc-to-mobile', { type: 'vibrate' })}>📳 振動</button>
+                          <button className="btn btn-secondary" style={{ height: '72px', fontSize: '15px', borderRadius: '20px' }} onClick={() => {
+                            const msg = prompt("メッセージ:", "こんにちは");
+                            if (msg) socket?.emit('pc-to-mobile', { type: 'alert', msg });
+                          }}>💬 通知送信</button>
+                          <button className="btn btn-primary" style={{ height: '72px', fontSize: '15px', borderRadius: '20px', background: '#3b82f6' }} onClick={() => {
+                            const url = prompt("送信URL:", "https://www.google.com");
+                            if (url) socket?.emit('pc-to-mobile', { type: 'open-url', url });
+                          }}>🔗 リンクを共有</button>
+                        </div>
+
+                        <div style={{ marginTop: 'auto', padding: '24px', background: '#f8fafc', borderRadius: '24px', border: '1px solid #f1f5f9' }}>
+                          <h5 style={{ fontSize: '12px', fontWeight: 800, color: '#64748b', marginBottom: '12px' }}>操作ヘルプ</h5>
+                          <p style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.6 }}>左のスマホ画面をクリックすると、実際の端末へタップ信号が転送されます。ドラッグしてスワイプ操作も可能です。</p>
+                        </div>
                       </div>
                     </div>
                   </div>
                 ))
               ) : (
-                <div className="card" style={{ padding: '60px', textAlign: 'center', background: '#f8fafc', border: '2px dashed #e2e8f0' }}>
-                  <div style={{ fontSize: '48px', marginBottom: '20px' }}>📱</div>
-                  <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#64748b' }}>スマホ接続待ち</h3>
-                  <p style={{ fontSize: '14px', color: '#94a3b8' }}>左側のQRコードをスキャンして接続してください。</p>
+                <div className="card" style={{ padding: '80px 40px', textAlign: 'center', background: '#fff', border: '2px dashed #e2e8f0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px' }}>
+                  <div style={{ position: 'relative' }}>
+                    <div style={{ fontSize: '64px' }}>📱</div>
+                    <div className="animate-pulse" style={{ position: 'absolute', top: -10, right: -10, width: '24px', height: '24px', background: '#10b981', borderRadius: '50%', border: '4px solid #fff' }} />
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: '20px', fontWeight: 800, color: '#0f172a', marginBottom: '8px' }}>スマホの接続を待っています</h3>
+                    <p style={{ fontSize: '15px', color: '#64748b' }}>左側のQRコードを読み取るか、パスコードを入力してください。</p>
+                  </div>
                 </div>
               )}
-              <div className="card" style={{ padding: '24px', display: 'flex', gap: '20px' }}>
-                <div style={{ flex: 1, padding: '20px', background: '#fefce8', borderRadius: '16px' }}>
-                  <p style={{ fontSize: '11px', fontWeight: 800, color: '#a16207' }}>PC CPU</p>
-                  <p style={{ fontSize: '24px', fontWeight: 900 }}>{stats.cpu}%</p>
-                </div>
-                <div style={{ flex: 1, padding: '20px', background: '#f0f9ff', borderRadius: '16px' }}>
-                  <p style={{ fontSize: '11px', fontWeight: 800, color: '#0369a1' }}>PC RAM</p>
-                  <p style={{ fontSize: '24px', fontWeight: 900 }}>{stats.mem}%</p>
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -766,9 +852,23 @@ export default function Home() {
           {tab === 'mouse' && (
             <motion.div key="mouse" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div className={`trackpad ${active ? 'trackpad-active' : ''}`} style={{ height: '52vh' }} onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd}>
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.1, pointerEvents: 'none' }}>
-                  <span style={{ fontSize: 80, fontWeight: 900 }}>PAD</span>
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.05, pointerEvents: 'none' }}>
+                  <span style={{ fontSize: 100, fontWeight: 900, letterSpacing: '20px' }}>TRACKPAD</span>
                 </div>
+                {touchIndicator && (
+                  <div style={{
+                    position: 'absolute',
+                    left: touchIndicator.x,
+                    top: touchIndicator.y,
+                    width: 40,
+                    height: 40,
+                    background: 'rgba(76, 175, 80, 0.2)',
+                    borderRadius: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    pointerEvents: 'none',
+                    border: '2px solid rgba(76, 175, 80, 0.4)'
+                  }} />
+                )}
               </div>
               <div className="grid-3">
                 <button className="btn btn-secondary" style={{ height: 64, fontWeight: 800 }} onClick={() => click('left')}>左</button>
@@ -895,11 +995,22 @@ export default function Home() {
 
               <div className="card" style={{ padding: 24 }}>
                 <h3 style={{ fontSize: 14, fontWeight: 900, marginBottom: 16, color: '#64748b' }}>画面設定</h3>
-                <div className="grid-2" style={{ gap: 12 }}>
-                  <button className="btn btn-secondary" style={{ fontSize: 11 }} onClick={() => showHint('拡張モード (擬似)')}>画面拡張</button>
-                  <button className="btn btn-secondary" style={{ fontSize: 11 }} onClick={() => showHint('ミラーモード (擬似)')}>複製モード</button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <button
+                    className="btn btn-primary"
+                    style={{ fontSize: 13, height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, background: '#1e293b' }}
+                    onClick={() => socket?.emit('system-control', 'display-settings')}
+                  >
+                    <span>🖥️</span> PCの配置設定を開く
+                  </button>
+                  <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '16px', border: '1px solid #f1f5f9' }}>
+                    <p style={{ fontSize: '11px', color: '#64748b', lineHeight: 1.6, fontWeight: 600 }}>
+                      スマホを第2モニターにするには：<br />
+                      1. PC側で「配置」を『拡張』にする<br />
+                      2. ミラーリングタブでサブ画面を選ぶ
+                    </p>
+                  </div>
                 </div>
-                <p style={{ fontSize: 10, color: '#94a3b8', marginTop: 12, textAlign: 'center' }}>※OS側の設定を開くには「マクロ」を使用してください</p>
               </div>
 
               <div className="card" style={{ padding: 24 }}>
@@ -949,19 +1060,33 @@ export default function Home() {
 
           {tab === 'macro' && (
             <motion.div key="macro">
-              <div className="grid-3" style={{ marginBottom: 20 }}>
+              <div className="card" style={{ padding: 16, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ fontSize: 20 }}>🔍</span>
+                <input
+                  className="input"
+                  style={{ border: 'none', background: 'transparent', padding: 0 }}
+                  placeholder="アプリを検索..."
+                  value={appSearch}
+                  onChange={e => setAppSearch(e.target.value)}
+                />
+              </div>
+
+              <h4 style={{ fontSize: 13, fontWeight: 900, marginBottom: 12, color: '#94a3b8' }}>SHORTCUTS</h4>
+              <div className="grid-3" style={{ marginBottom: 32 }}>
                 {shortcuts.map(s => (
-                  <button key={s.n} className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', alignItems: 'center' }} onClick={() => macro(s)}>
+                  <button key={s.n} className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }} onClick={() => macro(s)}>
                     <span style={{ fontSize: 32 }}>{s.icon}</span>
                     <span style={{ fontSize: 11, fontWeight: 800 }}>{s.n}</span>
                   </button>
                 ))}
               </div>
-              <div className="grid-5" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
-                {launchers.map(l => (
-                  <button key={l.n} className="card" style={{ padding: 10, display: 'flex', flexDirection: 'column', alignItems: 'center' }} onClick={() => launch(l.q, l.n)}>
-                    <span style={{ fontSize: 24 }}>{l.icon}</span>
-                    <span style={{ fontSize: 8, fontWeight: 800 }}>{l.n}</span>
+
+              <h4 style={{ fontSize: 13, fontWeight: 900, marginBottom: 12, color: '#94a3b8' }}>LAUNCHERS</h4>
+              <div className="grid-3" style={{ gap: 12 }}>
+                {launchers.filter(l => l.n.toLowerCase().includes(appSearch.toLowerCase())).map(l => (
+                  <button key={l.n} className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }} onClick={() => launch(l.q, l.n)}>
+                    <span style={{ fontSize: 32 }}>{l.icon}</span>
+                    <span style={{ fontSize: 11, fontWeight: 800 }}>{l.n}</span>
                   </button>
                 ))}
               </div>
@@ -1028,24 +1153,58 @@ export default function Home() {
           { id: 'mouse', icon: '🖱️', n: 'マウス' },
           { id: 'mirror', icon: '📡', n: 'ミラー' },
           { id: 'monitor', icon: '📊', n: 'モニター' },
-          { id: 'draw', icon: '🎨', n: '描画' },
-          { id: 'macro', icon: '🚀', n: 'マクロ' },
           { id: 'keys', icon: '⌨️', n: 'キー' },
-          { id: 'media', icon: '🎵', n: 'メディア' },
-          { id: 'power', icon: '🌙', n: '電源' },
-          { id: 'sync', icon: '📋', n: '同期' },
-          { id: 'config', icon: '⚙️', n: '設定' },
         ].map(t => (
-          <button key={t.id} className={`tab-item ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id as Tab)}>
+          <button key={t.id} className={`tab-item ${tab === t.id ? 'active' : ''}`} onClick={() => { setTab(t.id as Tab); setShowMoreMenu(false); }}>
             <div className="tab-icon">{t.icon}</div>
             <span className="tab-label">{t.n}</span>
           </button>
         ))}
+        <button className={`tab-item ${showMoreMenu ? 'active' : ''}`} onClick={() => setShowMoreMenu(!showMoreMenu)}>
+          <div className="tab-icon">➕</div>
+          <span className="tab-label">その他</span>
+        </button>
       </nav>
 
       <AnimatePresence>
+        {showMoreMenu && (
+          <motion.div
+            className="more-menu-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowMoreMenu(false)}
+          >
+            <motion.div
+              className="more-menu-content"
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              onClick={e => e.stopPropagation()}
+            >
+              {[
+                { id: 'draw', icon: '🎨', n: 'お絵描き' },
+                { id: 'macro', icon: '🚀', n: 'マクロ' },
+                { id: 'media', icon: '🎵', n: 'メディア' },
+                { id: 'num', icon: '🔟', n: 'テンキー' },
+                { id: 'power', icon: '🌙', n: '電源' },
+                { id: 'sync', icon: '📋', n: '同期' },
+                { id: 'config', icon: '⚙️', n: '設定' },
+              ].map(t => (
+                <button key={t.id} className="more-menu-item" onClick={() => { setTab(t.id as Tab); setShowMoreMenu(false); }}>
+                  <div style={{ fontSize: 32 }}>{t.icon}</div>
+                  <span style={{ fontSize: 11, fontWeight: 800 }}>{t.n}</span>
+                </button>
+              ))}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {hint && (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={{ position: 'fixed', bottom: 100, left: 16, right: 16, background: '#212121', color: '#fff', padding: '14px 24px', borderRadius: 16, textAlign: 'center', zIndex: 100 }}>{hint.toUpperCase()}</motion.div>
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={{ position: 'fixed', bottom: 100, left: 16, right: 16, background: '#212121', color: '#fff', padding: '14px 24px', borderRadius: 16, textAlign: 'center', zIndex: 100, fontWeight: 800 }}>{hint.toUpperCase()}</motion.div>
         )}
       </AnimatePresence>
     </main>
