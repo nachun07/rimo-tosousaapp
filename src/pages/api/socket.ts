@@ -1,10 +1,37 @@
 import { Server as NetServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
-import robot from 'robotjs';
 import { v4 as uuidv4 } from 'uuid';
 import si from 'systeminformation';
-import screenshot from 'screenshot-desktop';
 import { exec } from 'child_process';
+
+// Vercel等のサーバー環境でネイティブモジュールが使えない場合の対策
+let robot: any;
+try {
+  robot = require('robotjs');
+} catch (e) {
+  console.warn('[Socket] robotjs is not available in this environment.');
+  // Dummy robot implementation
+  robot = {
+    moveMouse: () => { },
+    dragMouse: () => { },
+    mouseClick: () => { },
+    mouseToggle: () => { },
+    scrollMouse: () => { },
+    keyTap: () => { },
+    typeString: () => { },
+    getMousePos: () => ({ x: 0, y: 0 })
+  };
+}
+
+let screenshot: any;
+try {
+  screenshot = require('screenshot-desktop');
+} catch (e) {
+  console.warn('[Socket] screenshot-desktop is not available in this environment.');
+  // Dummy screenshot implementation
+  screenshot = async () => Buffer.alloc(0);
+  screenshot.listDisplays = async () => [{ id: 0, name: 'Main (Mock)' }];
+}
 
 export const config = {
   api: {
