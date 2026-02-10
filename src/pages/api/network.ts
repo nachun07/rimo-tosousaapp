@@ -26,6 +26,7 @@ export default function handler(req: any, res: any) {
     res.status(200).json({
         ips: addresses,
         port: 3000,
-        token: token
+        token: token,
+        password: token.substring(0, 6).toUpperCase()
     });
 }

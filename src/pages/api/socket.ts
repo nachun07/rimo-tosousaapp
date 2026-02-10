@@ -189,7 +189,7 @@ const ioHandler = (req: any, res: any) => {
       socket.on('disconnect', () => {
         if (mirroringInterval) clearInterval(mirroringInterval);
         clearInterval(statsInterval);
-        socket.broadcast.emit('device-left', { id: socket.id });
+        syncDevices();
       });
     });
   }
