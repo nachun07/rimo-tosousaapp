@@ -44,6 +44,7 @@ export default function Home() {
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [appSearch, setAppSearch] = useState('');
   const [touchIndicator, setTouchIndicator] = useState<{ x: number, y: number } | null>(null);
+  const [targetServerUrl, setTargetServerUrl] = useState<string>('');
 
   const last = useRef({ x: 0, y: 0 });
   const fingers = useRef(0);
@@ -82,6 +83,12 @@ export default function Home() {
     if (user) {
       const params = new URLSearchParams(window.location.search);
       const token = params.get('token') || localStorage.getItem('remote_token');
+      const serverUrl = params.get('server') || localStorage.getItem('remote_server');
+
+      if (serverUrl) {
+        setTargetServerUrl(serverUrl);
+        localStorage.setItem('remote_server', serverUrl);
+      }
 
       if (token) {
         if (params.get('token')) localStorage.setItem('remote_token', params.get('token')!);
@@ -139,8 +146,17 @@ export default function Home() {
   }, [connectionTime]);
 
   const init = async (token: string) => {
-    await fetch('/api/socket');
-    const s = io({ path: '/api/socket', auth: { token } });
+    const isVercel = window.location.hostname.includes('vercel.app');
+    const connectUrl = targetServerUrl || (isVercel ? '' : window.location.origin);
+
+    // Vercel自身ではなく、指定されたサーバー（自宅Mac）のSocket.IOを探しに行く
+    const socketOptions = {
+      path: '/api/socket',
+      auth: { token },
+      transports: ['websocket', 'polling']
+    };
+
+    const s = connectUrl ? io(connectUrl, socketOptions) : io(socketOptions);
 
     s.on('connect', () => {
       setSocket(s);
@@ -250,8 +266,11 @@ export default function Home() {
       if (d.ips && d.ips.length) {
         setIpAddress(d.ips[0]);
         const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        const baseUrl = isLocal ? `http://${d.ips[0]}:${d.port}` : window.location.origin;
-        const url = `${baseUrl}?token=${d.token}`;
+
+        // ngrokなどの公開URLがあればそれを優先し、なければローカルIPを使う
+        const publicUrl = window.location.origin.includes('vercel.app') ? '' : window.location.origin;
+        const baseUrl = publicUrl || (isLocal ? `http://${d.ips[0]}:${d.port}` : window.location.origin);
+        const url = `${baseUrl}?token=${d.token}&server=${encodeURIComponent(baseUrl)}`;
 
         QRCode.toDataURL(url, { width: 400, margin: 2, color: { dark: '#10b981', light: '#ffffff' } }).then(setQrCode);
 
