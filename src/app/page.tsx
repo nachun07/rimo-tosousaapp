@@ -516,25 +516,30 @@ export default function Home() {
 
     // セキュリティ環境のチェック
     if (!window.isSecureContext && window.location.hostname !== 'localhost') {
-      alert("⚠️ セキュリティ保護されていない接続(HTTP)からはログインできません。HTTPSのURL（Vercelやngrokのhttps://...）を使用してください。");
+      alert("⚠️ セキュリティ保護されていない接続(HTTP)からはログインできません。\n\nngrokやVercelの【https://】で始まるURLからアクセスしているか確認してください。もしIPアドレス(192.168...)で開いている場合は、ngrokのURLを使ってください。");
       return;
     }
 
     try {
-      // まずはポップアップを試みる（デスクトップや一部のモバイルブラウザで快適）
-      await signInWithPopup(auth, googleProvider);
+      if (isMobile) {
+        // スマホの場合はポップアップを試すとブロックされやすいため、最初からリダイレクトを実行
+        await signInWithRedirect(auth, googleProvider);
+      } else {
+        // デスクトップはポップアップの方が使い勝手が良いため継続
+        await signInWithPopup(auth, googleProvider);
+      }
     } catch (e: any) {
-      console.log("Login error code:", e.code);
-      // ポップアップがブロックされた、または特定のモバイル環境の場合はリダイレクトを試みる
-      if (e.code === 'auth/popup-blocked' || e.code === 'auth/cancelled-popup-request' || isMobile) {
+      console.error("Login attempt error:", e.code, e);
+
+      // ポップアップがブロックされた場合のフォールバック（主にデスクトップ用）
+      if (!isMobile && (e.code === 'auth/popup-blocked' || e.code === 'auth/cancelled-popup-request')) {
         try {
           await signInWithRedirect(auth, googleProvider);
         } catch (re: any) {
-          console.error("Redirect login error:", re);
           alert("ログインを開始できませんでした。ブラウザの設定でポップアップとリダイレクトを許可してください。");
         }
       } else if (e.code !== 'auth/popup-closed-by-user') {
-        setAuthError(`エラーが発生しました: ${e.message}`);
+        alert("⚠️ ログインに失敗しました。\n\n【原因の可能性】\n1. ブラウザの設定で「サイト越えトラッキングを防ぐ」がオンになっている\n2. Firebase Consoleで、現在のドメイン(" + window.location.hostname + ")が「承認済みドメイン」に追加されていない\n\n設定を確認してください。");
       }
     }
   };
