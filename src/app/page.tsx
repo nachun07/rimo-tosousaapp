@@ -899,8 +899,19 @@ export default function Home() {
               ) : (
                 <div className="card" style={{ padding: 24 }}>
                   <input
-                    type="text" className="input" placeholder="000000" value={passwordInput} maxLength={6}
-                    onChange={e => setPasswordInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                    type="text"
+                    className="input"
+                    placeholder="ABC123"
+                    value={passwordInput}
+                    maxLength={6}
+                    autoCapitalize="characters"
+                    autoCorrect="off"
+                    autoComplete="off"
+                    spellCheck="false"
+                    onChange={e => {
+                      const val = e.target.value.replace(/[Ａ-Ｚａ-ｚ０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+                      setPasswordInput(val.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+                    }}
                     style={{ height: 72, fontSize: 32, textAlign: 'center', letterSpacing: 8, fontWeight: 900, marginBottom: 16 }}
                   />
                   <button onClick={loginWithPassword} className="btn btn-primary" style={{ width: '100%', height: 56 }}>接続する</button>
