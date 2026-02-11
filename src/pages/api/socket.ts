@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import si from 'systeminformation';
 import { exec } from 'child_process';
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getDatabase, ref, onChildAdded, remove } from "firebase/database";
+import { getDatabase, ref, onChildAdded, remove, set } from "firebase/database";
 
 // Vercel等のサーバー環境でネイティブモジュールが使えない場合の対策
 let robot: any;
@@ -142,7 +142,7 @@ const ioHandler = (req: any, res: any) => {
         }
       });
 
-      const handleCommand = (data: any) => {
+      const handleCommand = async (data: any) => {
         try {
           switch (data.type) {
             case 'mouse-move': robot.moveMouse(robot.getMousePos().x + (data.dx * (data.sensitivity || 1)), robot.getMousePos().y + (data.dy * (data.sensitivity || 1))); break;
@@ -173,6 +173,17 @@ const ioHandler = (req: any, res: any) => {
               break;
             case 'open-path': exec(`open "${data.path}"`); break;
             case 'media-control': robot.keyTap(data.action); break;
+            case 'get-screenshot':
+              try {
+                const img = await screenshot({ format: 'jpg', screen: data.displayId || 0 });
+                const base64 = `data:image/jpeg;base64,${img.toString('base64')}`;
+                const uid = (socket as any).uid;
+                if (uid) {
+                  set(ref(db, `users/${uid}/screenshot`), base64);
+                }
+                socket.emit('screenshot-data', base64);
+              } catch (e) { }
+              break;
           }
         } catch (e) {
           console.error('[Relay] Command execution error:', e);

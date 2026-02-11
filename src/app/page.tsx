@@ -53,6 +53,7 @@ export default function Home() {
   const fingers = useRef(0);
   const scrollY = useRef(0);
   const scannerRef = useRef<any>(null); // Html5Qrcode インスタンス用
+  const lastEmitTime = useRef(0);
   const isInitialized = useRef(false);
 
   const shortcuts = [
@@ -146,6 +147,28 @@ export default function Home() {
       }
     }
   }, [user]);
+
+  // Firebaseからの情報（リレー時のSS等）を受信
+  useEffect(() => {
+    if (user && isMobile) {
+      import('firebase/database').then(({ ref, onValue }) => {
+        const ssRef = ref(db, `users/${user.uid}/screenshot`);
+        const unsub = onValue(ssRef, (snap) => {
+          const data = snap.val();
+          if (data) setSs(data);
+        });
+        return () => unsub();
+      });
+    }
+  }, [user, isMobile]);
+
+  // ログイン状態が変わったらSocketのロール属性も更新する
+  useEffect(() => {
+    if (socket && user) {
+      const mobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      socket.emit('set-role', mobile ? 'mobile' : 'pc', user.uid);
+    }
+  }, [socket, user]);
 
   useEffect(() => {
     if (showScanner) {
@@ -559,7 +582,12 @@ export default function Home() {
   };
 
   const onMove = useCallback((e: React.TouchEvent) => {
-    if (!socket?.connected) return;
+    // 直結ソケットがない場合はFirebase Relayを使用するため、socket.connectedチェックを外す
+    // ただし、Firebaseへのmousemove送信は頻度が高すぎるため、Relay時は間引く
+    const isRelay = !socket?.connected;
+    const now = Date.now();
+    if (isRelay && (now - lastEmitTime.current < 150)) return; // Relay時は150msに1回
+
     const dx = e.touches[0].clientX - last.current.x;
     const dy = e.touches[0].clientY - last.current.y;
     touchData.current.moved += Math.sqrt(dx * dx + dy * dy);
@@ -584,7 +612,8 @@ export default function Home() {
       }
     }
     last.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-  }, [socket, sens, scrollSens, scroll, tab]);
+    if (isRelay) lastEmitTime.current = now;
+  }, [socket, sens, scrollSens, scroll, tab, emit]);
 
   const onEnd = () => {
     const duration = Date.now() - touchData.current.startTime;
