@@ -50,7 +50,8 @@ export default function Home() {
   const last = useRef({ x: 0, y: 0 });
   const fingers = useRef(0);
   const scrollY = useRef(0);
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const scannerRef = useRef<any>(null); // Html5Qrcode インスタンス用
+  const isInitialized = useRef(false);
 
   const shortcuts = [
     { n: '保存', k: ['s'], m: ['command'], icon: '💾', color: '#4caf50' },
@@ -102,44 +103,62 @@ export default function Home() {
       if (token) {
         if (params.get('token')) localStorage.setItem('remote_token', params.get('token')!);
         init(token);
-      } else if (!mobile && !qrCode) {
+      } else if (!mobile && !isInitialized.current) {
         refresh();
         init('pc-internal');
+        isInitialized.current = true;
       }
     }
-  }, [user, qrCode]);
+  }, [user]);
 
   useEffect(() => {
     if (showScanner) {
-      if (!window.isSecureContext) {
-        setAuthError("ブラウザの制限により、IPアドレス直接接続（HTTP）ではカメラが使えません。6桁のパスワードを入力してください。");
+      if (!window.isSecureContext && window.location.hostname !== 'localhost') {
+        setAuthError("セキュリティ(HTTPS)の制限によりカメラが使えません。パスワードを入力してください。");
         setShowScanner(false);
         setShowPasswordLogin(true);
         return;
       }
 
-      const scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: { width: 250, height: 250 } }, false);
-      scannerRef.current = scanner;
+      // ライブラリを動的にインポート（SSR回避）
+      import('html5-qrcode').then(({ Html5Qrcode }) => {
+        const html5QrCode = new Html5Qrcode("reader");
+        scannerRef.current = html5QrCode;
 
-      scanner.render((decodedText) => {
-        try {
-          const url = new URL(decodedText);
-          const token = url.searchParams.get('token');
-          if (token) {
-            localStorage.setItem('remote_token', token);
-            // 現在のドメインを維持して、トークンだけ適用してリロードする
-            const nextUrl = new URL(window.location.origin);
-            nextUrl.searchParams.set('token', token);
-            window.location.href = nextUrl.toString();
-          }
-        } catch (e) {
-          console.error("Invalid QR:", e);
-        }
-      }, (error) => { });
+        const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+
+        html5QrCode.start(
+          { facingMode: "environment" },
+          config,
+          (decodedText) => {
+            try {
+              const url = new URL(decodedText);
+              const token = url.searchParams.get('token');
+              const server = url.searchParams.get('server');
+              if (token) {
+                localStorage.setItem('remote_token', token);
+                if (server) localStorage.setItem('remote_server', server);
+                showHint('📷 スキャン成功');
+                const nextUrl = new URL(window.location.origin);
+                nextUrl.searchParams.set('token', token);
+                if (server) nextUrl.searchParams.set('server', server);
+                window.location.href = nextUrl.toString();
+              }
+            } catch (e) { console.error(e); }
+          },
+          () => { }
+        ).catch(err => {
+          console.error("Camera access error:", err);
+          setAuthError("カメラの起動に失敗しました。");
+          setShowScanner(false);
+        });
+      });
 
       return () => {
         if (scannerRef.current) {
-          scannerRef.current.clear().catch(e => console.error(e));
+          scannerRef.current.stop().then(() => {
+            scannerRef.current.clear();
+          }).catch((e: any) => console.error(e));
         }
       };
     }
@@ -269,7 +288,6 @@ export default function Home() {
 
   const refresh = async () => {
     setTempPassword('生成中...');
-    setQrCode('');
     try {
       const r = await fetch('/api/network');
       const d = await r.json();
@@ -918,10 +936,19 @@ export default function Home() {
       <main style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, background: '#fafafa' }}>
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} style={{ width: '100%', maxWidth: 360, textAlign: 'center' }}>
           {showScanner ? (
-            <div className="card" style={{ padding: 16 }}>
-              <h3 style={{ marginBottom: 16, fontWeight: 800 }}>QRコードをスキャン</h3>
-              <div id="reader" style={{ width: '100%' }}></div>
-              <button onClick={() => setShowScanner(false)} className="btn btn-secondary" style={{ width: '100%', marginTop: 16 }}>キャンセル</button>
+            <div className="card" style={{ padding: 24, borderRadius: 32, overflow: 'hidden' }}>
+              <h3 style={{ marginBottom: 20, fontWeight: 900, fontSize: 18 }}>QRコードを読み取る</h3>
+              <div id="reader" style={{ width: '100%', borderRadius: 16, overflow: 'hidden', background: '#000' }}></div>
+              <div style={{ marginTop: 20, color: '#64748b', fontSize: 13, fontWeight: 600 }}>
+                PC画面のQRコードを枠内に収めてください
+              </div>
+              <button
+                onClick={() => setShowScanner(false)}
+                className="btn btn-secondary"
+                style={{ width: '100%', marginTop: 24, height: 56, borderRadius: 16 }}
+              >
+                キャンセル
+              </button>
             </div>
           ) : (
             <>
