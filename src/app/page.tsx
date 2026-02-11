@@ -46,6 +46,7 @@ export default function Home() {
   const [touchIndicator, setTouchIndicator] = useState<{ x: number, y: number } | null>(null);
   const [targetServerUrl, setTargetServerUrl] = useState<string>('');
   const [tick, setTick] = useState(0);
+  const [isConnecting, setIsConnecting] = useState(false);
 
   const last = useRef({ x: 0, y: 0 });
   const fingers = useRef(0);
@@ -137,12 +138,13 @@ export default function Home() {
               const server = url.searchParams.get('server');
               if (token) {
                 localStorage.setItem('remote_token', token);
-                if (server) localStorage.setItem('remote_server', server);
+                if (server) {
+                  localStorage.setItem('remote_server', server);
+                  setTargetServerUrl(server);
+                }
                 showHint('📷 スキャン成功');
-                const nextUrl = new URL(window.location.origin);
-                nextUrl.searchParams.set('token', token);
-                if (server) nextUrl.searchParams.set('server', server);
-                window.location.href = nextUrl.toString();
+                setShowScanner(false);
+                init(token); // リロードせずに直接接続開始
               }
             } catch (e) { console.error(e); }
           },
@@ -174,6 +176,7 @@ export default function Home() {
   }, [connectionTime]);
 
   const init = async (token: string) => {
+    setIsConnecting(true);
     const isVercel = window.location.hostname.includes('vercel.app');
     const connectUrl = targetServerUrl || (isVercel ? '' : window.location.origin);
 
@@ -187,6 +190,7 @@ export default function Home() {
     const s = connectUrl ? io(connectUrl, socketOptions) : io(socketOptions);
 
     s.on('connect', () => {
+      setIsConnecting(false);
       setSocket(s);
       setAuthError('');
       const mobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
@@ -258,6 +262,7 @@ export default function Home() {
     });
 
     s.on('connect_error', (err) => {
+      setIsConnecting(false);
       console.error(`[Socket] Connection error (${token?.substring(0, 3)}...):`, err.message);
 
       const msg = err.message.toUpperCase();
@@ -953,9 +958,9 @@ export default function Home() {
           ) : (
             <>
               <div style={{ width: 88, height: 88, borderRadius: 24, background: '#e3f2fd', color: '#1976d2', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 32px' }}>
-                <img src={user.photoURL || ''} style={{ width: '100%', borderRadius: 24 }} />
+                <img src={user.photoURL || ''} style={{ width: '100%', borderRadius: 24 }} alt="" />
               </div>
-              <h2 style={{ fontSize: 24, fontWeight: 800, marginBottom: 16 }}>おかえりなさい、{user.displayName?.split(' ')[0]}さん</h2>
+              <h2 style={{ fontSize: 24, fontWeight: 900, marginBottom: 16 }}>こんにちは、{user.displayName?.split(' ')[0]}さん</h2>
               <p style={{ color: '#616161', marginBottom: 32, lineHeight: 1.6, fontSize: 14, padding: '0 20px' }}>
                 接続を開始するには、PC画面に表示されているQRコードをよみ取るか、パスワードを入力してください。
               </p>
@@ -968,24 +973,33 @@ export default function Home() {
                 </div>
               ) : (
                 <div className="card" style={{ padding: 24 }}>
-                  <input
-                    type="text"
-                    className="input"
-                    placeholder="ABC123"
-                    value={passwordInput}
-                    maxLength={6}
-                    autoCapitalize="characters"
-                    autoCorrect="off"
-                    autoComplete="off"
-                    spellCheck="false"
-                    onChange={e => {
-                      const val = e.target.value.replace(/[Ａ-Ｚａ-ｚ０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
-                      setPasswordInput(val.toUpperCase().replace(/[^A-Z0-9]/g, ''));
-                    }}
-                    style={{ height: 72, fontSize: 32, textAlign: 'center', letterSpacing: 8, fontWeight: 900, marginBottom: 16 }}
-                  />
-                  <button onClick={loginWithPassword} className="btn btn-primary" style={{ width: '100%', height: 56 }}>接続する</button>
-                  <button onClick={() => setShowPasswordLogin(false)} style={{ background: 'none', border: 'none', color: '#9e9e9e', fontWeight: 700, marginTop: 16 }}>キャンセル</button>
+                  {isConnecting ? (
+                    <div style={{ padding: '20px 0' }}>
+                      <div className="animate-spin" style={{ width: 40, height: 40, border: '4px solid #f1f5f9', borderTopColor: '#10b981', borderRadius: '50%', margin: '0 auto 20px' }}></div>
+                      <p style={{ fontWeight: 800, color: '#10b981' }}>PCに接続中...</p>
+                    </div>
+                  ) : (
+                    <>
+                      <input
+                        type="text"
+                        className="input"
+                        placeholder="ABC123"
+                        value={passwordInput}
+                        maxLength={6}
+                        autoCapitalize="characters"
+                        autoCorrect="off"
+                        autoComplete="off"
+                        spellCheck="false"
+                        onChange={e => {
+                          const val = e.target.value.replace(/[Ａ-Ｚａ-ｚ０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+                          setPasswordInput(val.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+                        }}
+                        style={{ height: 72, fontSize: 32, textAlign: 'center', letterSpacing: 8, fontWeight: 900, marginBottom: 16 }}
+                      />
+                      <button onClick={loginWithPassword} className="btn btn-primary" style={{ width: '100%', height: 56 }}>接続する</button>
+                    </>
+                  )}
+                  <button onClick={() => { setShowPasswordLogin(false); setIsConnecting(false); }} style={{ background: 'none', border: 'none', color: '#9e9e9e', fontWeight: 700, marginTop: 16 }}>キャンセル</button>
                 </div>
               )}
             </>
