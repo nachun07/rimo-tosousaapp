@@ -3,6 +3,8 @@ import { Server as SocketIOServer } from 'socket.io';
 import { v4 as uuidv4 } from 'uuid';
 import si from 'systeminformation';
 import { exec } from 'child_process';
+import { initializeApp, getApps, getApp } from "firebase/app";
+import { getDatabase, ref, onChildAdded, remove } from "firebase/database";
 
 // Vercel等のサーバー環境でネイティブモジュールが使えない場合の対策
 let robot: any;
@@ -38,6 +40,19 @@ export const config = {
     bodyParser: false,
   },
 };
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCtEgtzYj-1SXeWqwxRY_9joMAPSbJWk8Q",
+  authDomain: "rimo-to-app.firebaseapp.com",
+  databaseURL: "https://rimo-to-app-default-rtdb.firebaseio.com",
+  projectId: "rimo-to-app",
+  storageBucket: "rimo-to-app.firebasestorage.app",
+  messagingSenderId: "531834533075",
+  appId: "1:531834533075:web:960e089a823668ad80d026"
+};
+
+const fbApp = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+const db = getDatabase(fbApp);
 
 const validTokens = new Map<string, number>();
 
@@ -103,11 +118,66 @@ const ioHandler = (req: any, res: any) => {
       };
 
       // 役割の通知
-      socket.on('set-role', (role: 'pc' | 'mobile') => {
+      socket.on('set-role', (role: 'pc' | 'mobile', uid?: string) => {
         (socket as any).role = role;
-        console.log(`Socket ${socket.id} is now ${role}`);
+        (socket as any).uid = uid;
+        console.log(`Socket ${socket.id} is now ${role}${uid ? ' for user ' + uid : ''}`);
         syncDevices();
+
+        // PCの場合、Firebaseからのコマンド待ち受けを開始
+        if (role === 'pc' && uid) {
+          console.log(`[Firebase] Starting relay listener for user: ${uid}`);
+          const cmdRef = ref(db, `users/${uid}/commands`);
+          const unsub = onChildAdded(cmdRef, (snapshot) => {
+            const cmd = snapshot.val();
+            if (!cmd) return;
+
+            console.log(`[Firebase] Relay command received: ${cmd.type}`);
+            handleCommand(cmd);
+
+            // 実行したら削除
+            remove(snapshot.ref);
+          });
+          socket.on('disconnect', () => unsub());
+        }
       });
+
+      const handleCommand = (data: any) => {
+        try {
+          switch (data.type) {
+            case 'mouse-move': robot.moveMouse(robot.getMousePos().x + (data.dx * (data.sensitivity || 1)), robot.getMousePos().y + (data.dy * (data.sensitivity || 1))); break;
+            case 'mouse-drag': robot.dragMouse(robot.getMousePos().x + (data.dx * (data.sensitivity || 1)), robot.getMousePos().y + (data.dy * (data.sensitivity || 1))); break;
+            case 'mouse-click': robot.mouseClick(data.button || 'left', data.double || false); break;
+            case 'mouse-toggle': robot.mouseToggle(data.down ? 'down' : 'up', data.button); break;
+            case 'mouse-scroll': robot.scrollMouse(0, -data.dy); break;
+            case 'key-tap': robot.keyTap(data.key, data.modifiers || []); break;
+            case 'type-string': robot.typeString(data.text); break;
+            case 'custom-macro':
+              if (Array.isArray(data.keys)) {
+                data.keys.forEach((k: string) => robot.keyTap(k, data.modifiers || []));
+              } else {
+                robot.keyTap(data.keys, data.modifiers || []);
+              }
+              break;
+            case 'system-control':
+              switch (data.action) {
+                case 'sleep': exec('pmset sleepnow'); break;
+                case 'lock': exec('open -a ScreenSaverEngine'); break;
+                case 'volume-up': exec('osascript -e "set volume output volume (output volume of (get volume settings) + 6)"'); break;
+                case 'volume-down': exec('osascript -e "set volume output volume (output volume of (get volume settings) - 6)"'); break;
+                case 'mute': exec('osascript -e "set volume with output muted"'); break;
+                case 'brightness-up': exec('osascript -e "tell application \"System Events\" to repeat 2 times" -e "key code 144" -e "end repeat"'); break;
+                case 'brightness-down': exec('osascript -e "tell application \"System Events\" to repeat 2 times" -e "key code 145" -e "end repeat"'); break;
+                case 'display-settings': exec('open "x-apple.systempreferences:com.apple.Displays-Settings.extension"'); break;
+              }
+              break;
+            case 'open-path': exec(`open "${data.path}"`); break;
+            case 'media-control': robot.keyTap(data.action); break;
+          }
+        } catch (e) {
+          console.error('[Relay] Command execution error:', e);
+        }
+      };
 
       // マウス/キーボード操作 (Mobile -> PC)
       socket.on('mouse-move', (data: any) => robot.moveMouse(robot.getMousePos().x + (data.dx * (data.sensitivity || 1)), robot.getMousePos().y + (data.dy * (data.sensitivity || 1))));
