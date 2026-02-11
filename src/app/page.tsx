@@ -144,7 +144,8 @@ export default function Home() {
                 }
                 showHint('📷 スキャン成功');
                 setShowScanner(false);
-                init(token); // リロードせずに直接接続開始
+                // 取得したサーバーURLを直接渡して即時接続
+                init(token, server || undefined);
               }
             } catch (e) { console.error(e); }
           },
@@ -175,10 +176,11 @@ export default function Home() {
     }
   }, [connectionTime]);
 
-  const init = async (token: string) => {
+  const init = async (token: string, forcedServerUrl?: string) => {
     setIsConnecting(true);
+    setAuthError('');
     const isVercel = window.location.hostname.includes('vercel.app');
-    const connectUrl = targetServerUrl || (isVercel ? '' : window.location.origin);
+    const connectUrl = forcedServerUrl || targetServerUrl || (isVercel ? '' : window.location.origin);
 
     // Vercel自身ではなく、指定されたサーバー（自宅Mac）のSocket.IOを探しに行く
     const socketOptions = {
@@ -264,6 +266,13 @@ export default function Home() {
     s.on('connect_error', (err) => {
       setIsConnecting(false);
       console.error(`[Socket] Connection error (${token?.substring(0, 3)}...):`, err.message);
+
+      const isVercel = window.location.hostname.includes('vercel.app');
+      if (isVercel && !targetServerUrl && !forcedServerUrl) {
+        setAuthError('PCの接続先URLが見つかりません。QRコードをもう一度スキャンしてください。');
+      } else {
+        setAuthError(`接続に失敗しました: ${err.message === 'xhr poll error' ? 'サーバーがオフラインです' : err.message}`);
+      }
 
       const msg = err.message.toUpperCase();
       const isAuthError = msg.includes('AUTH') || msg.includes('FAILED') || msg.includes('TOKEN') || msg.includes('EXPIRED') || msg.includes('RETRY');
@@ -359,6 +368,7 @@ export default function Home() {
         init(data.token);
         setShowPasswordLogin(false);
       } else {
+        setIsConnecting(false);
         setAuthError(data.message || 'パスワードが正しくありません。最新の番号を入力してください。');
       }
     } catch (e) {
