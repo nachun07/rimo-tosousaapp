@@ -180,7 +180,29 @@ export default function Home() {
     setIsConnecting(true);
     setAuthError('');
     const isVercel = window.location.hostname.includes('vercel.app');
-    const connectUrl = forcedServerUrl || targetServerUrl || (isVercel ? '' : window.location.origin);
+
+    // 接続先の決定優先順位:
+    // 1. スキャンや入力で強制されたURL (forcedServerUrl)
+    // 2. 保存されているURL (targetServerUrl)
+    // 3. PC内部接続(localhost)
+    // 4. 現在のドメイン (Vercel以外の場合のみ)
+    let connectUrl = forcedServerUrl || targetServerUrl;
+
+    if (token === 'pc-internal' && isVercel) {
+      connectUrl = 'http://localhost:3000';
+    }
+
+    if (!connectUrl && !isVercel) {
+      connectUrl = window.location.origin;
+    }
+
+    // Vercel自身にはWebSocketサーバーがないため、スマホがここに繋ごうとしたらエラーを出すか
+    // もしくは接続を試みない。
+    if (isMobile && !connectUrl) {
+      setAuthError('接続先(サーバーURL)が指定されていません。Vercelで開いている場合は、PC側のQRコードをスキャンしてください。');
+      setIsConnecting(false);
+      return;
+    }
 
     // Vercel自身ではなく、指定されたサーバー（自宅Mac）のSocket.IOを探しに行く
     const socketOptions = {
@@ -269,9 +291,9 @@ export default function Home() {
 
       const isVercel = window.location.hostname.includes('vercel.app');
       if (isVercel && !targetServerUrl && !forcedServerUrl) {
-        setAuthError('PCの接続先URLが見つかりません。QRコードをもう一度スキャンしてください。');
+        setAuthError('接続先(サーバー)が見つかりません。PC側の「再生成」ボタンを押して、新しいQRコードを読み取ってください。');
       } else {
-        setAuthError(`接続に失敗しました: ${err.message === 'xhr poll error' ? 'サーバーがオフラインです' : err.message}`);
+        setAuthError(`接続失敗: ${err.message === 'xhr poll error' ? 'サーバー(PC)がオフラインです' : 'WebSocketエラー'}`);
       }
 
       const msg = err.message.toUpperCase();
@@ -310,12 +332,21 @@ export default function Home() {
         setIpAddress(d.ips[0]);
         const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
-        // ngrokなどの公開URLがあればそれを優先し、なければローカルIPを使う
-        const publicUrl = window.location.origin.includes('vercel.app') ? '' : window.location.origin;
-        const baseUrl = publicUrl || (isLocal ? `http://${d.ips[0]}:${d.port}` : window.location.origin);
-        const url = `${baseUrl}?token=${d.token}&server=${encodeURIComponent(baseUrl)}`;
+        // スマホが接続すべきベースURLを決定
+        // Vercelで開いている場合は、自分ではなく自宅PC(localhost/IP)を指す必要がある
+        let baseUrl = window.location.origin;
+        if (window.location.hostname.includes('vercel.app')) {
+          baseUrl = `http://${d.ips[0]}:${d.port}`;
+        } else if (isLocal) {
+          baseUrl = `http://${d.ips[0]}:${d.port}`;
+        }
 
-        QRCode.toDataURL(url, { width: 400, margin: 2, color: { dark: '#10b981', light: '#ffffff' } }).then(setQrCode);
+        // QRコードに含めるURL
+        // スマホはVercelのページを開きつつ、serverパラメータで自宅のPC(baseUrl)を指定する
+        const publicFrontendUrl = window.location.hostname.includes('vercel.app') ? window.location.origin : baseUrl;
+        const qrContent = `${publicFrontendUrl}?token=${d.token}&server=${encodeURIComponent(baseUrl)}`;
+
+        QRCode.toDataURL(qrContent, { width: 400, margin: 2, color: { dark: '#10b981', light: '#ffffff' } }).then(setQrCode);
 
         // サーバー側のパスワード（PIN）を取得または設定
         const pass = d.password;
