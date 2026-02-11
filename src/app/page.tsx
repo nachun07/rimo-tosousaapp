@@ -401,6 +401,15 @@ export default function Home() {
 
         if (authRes.ok) {
           setTempPassword(pass);
+          // Firebaseに接続情報を同期 (スマホがVercel経由で見つけられるようにする)
+          if (user) {
+            set(ref(db, `users/${user.uid}/connection`), {
+              password: pass,
+              token: d.token,
+              server: baseUrl,
+              updatedAt: Date.now()
+            });
+          }
         } else {
           setTempPassword('ERR');
           showHint('パスワード登録失敗');
@@ -417,11 +426,13 @@ export default function Home() {
   };
 
   const loginWithPassword = async () => {
-    if (passwordInput.length !== 6) return;
+    if (passwordInput.length < 6) return;
+    setIsConnecting(true);
     setAuthError('');
     showHint('⚡ 認証中...');
 
     try {
+      // 1. ローカルAPIでの認証を試みる (同じネットワーク内の場合)
       const idToken = await user?.getIdToken();
       const res = await fetch('/api/auth', {
         method: 'POST',
@@ -429,16 +440,38 @@ export default function Home() {
         body: JSON.stringify({ password: passwordInput })
       });
       const data = await res.json();
+
       if (data.success) {
         localStorage.setItem('remote_token', data.token);
         init(data.token);
         setShowPasswordLogin(false);
-      } else {
-        setIsConnecting(false);
-        setAuthError(data.message || 'パスワードが正しくありません。最新の番号を入力してください。');
+        return;
       }
+
+      // 2. Firebaseに保存された接続情報を確認 (Vercel経由の場合)
+      if (user) {
+        const { get, ref: dbRef } = await import('firebase/database');
+        const snap = await get(dbRef(db, `users/${user.uid}/connection`));
+        const conn = snap.val();
+
+        if (conn && conn.password === passwordInput) {
+          localStorage.setItem('remote_token', conn.token);
+          if (conn.server) {
+            localStorage.setItem('remote_server', conn.server);
+            setTargetServerUrl(conn.server);
+          }
+          init(conn.token, conn.server);
+          setShowPasswordLogin(false);
+          return;
+        }
+      }
+
+      setIsConnecting(false);
+      setAuthError('パスワードが正しくありません。最新の番号を入力してください。');
     } catch (e) {
-      setAuthError('サーバーとの通信に失敗しました');
+      console.error(e);
+      setIsConnecting(false);
+      setAuthError('通信エラーが発生しました。インターネット接続を確認してください。');
     }
   };
 
@@ -1011,84 +1044,16 @@ export default function Home() {
     );
   }
 
-  // Mobile Screen: Unconnected
-  if (!socket?.connected) {
-    return (
-      <main style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, background: '#fafafa' }}>
-        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} style={{ width: '100%', maxWidth: 360, textAlign: 'center' }}>
-          {showScanner ? (
-            <div className="card" style={{ padding: 24, borderRadius: 32, overflow: 'hidden' }}>
-              <h3 style={{ marginBottom: 20, fontWeight: 900, fontSize: 18 }}>QRコードを読み取る</h3>
-              <div id="reader" style={{ width: '100%', borderRadius: 16, overflow: 'hidden', background: '#000' }}></div>
-              <div style={{ marginTop: 20, color: '#64748b', fontSize: 13, fontWeight: 600 }}>
-                PC画面のQRコードを枠内に収めてください
-              </div>
-              <button
-                onClick={() => setShowScanner(false)}
-                className="btn btn-secondary"
-                style={{ width: '100%', marginTop: 24, height: 56, borderRadius: 16 }}
-              >
-                キャンセル
-              </button>
-            </div>
-          ) : (
-            <>
-              <div style={{ width: 88, height: 88, borderRadius: 24, background: '#e3f2fd', color: '#1976d2', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 32px' }}>
-                <img src={user.photoURL || ''} style={{ width: '100%', borderRadius: 24 }} alt="" />
-              </div>
-              <h2 style={{ fontSize: 24, fontWeight: 900, marginBottom: 16 }}>こんにちは、{user.displayName?.split(' ')[0]}さん</h2>
-              <p style={{ color: '#616161', marginBottom: 32, lineHeight: 1.6, fontSize: 14, padding: '0 20px' }}>
-                接続を開始するには、PC画面に表示されているQRコードをよみ取るか、パスワードを入力してください。
-              </p>
-              {authError && <div className="badge badge-danger" style={{ marginBottom: 24, padding: '10px 16px' }}>{authError}</div>}
-
-              {!showPasswordLogin ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <button onClick={() => setShowScanner(true)} className="btn btn-primary" style={{ height: 64, fontSize: 17 }}>スキャナーを起動</button>
-                  <button onClick={() => setShowPasswordLogin(true)} className="btn btn-secondary" style={{ height: 60 }}>パスワードで入力</button>
-                </div>
-              ) : (
-                <div className="card" style={{ padding: 24 }}>
-                  {isConnecting ? (
-                    <div style={{ padding: '20px 0' }}>
-                      <div className="animate-spin" style={{ width: 40, height: 40, border: '4px solid #f1f5f9', borderTopColor: '#10b981', borderRadius: '50%', margin: '0 auto 20px' }}></div>
-                      <p style={{ fontWeight: 800, color: '#10b981' }}>PCに接続中...</p>
-                    </div>
-                  ) : (
-                    <>
-                      <input
-                        type="text"
-                        className="input"
-                        placeholder="ABC123"
-                        value={passwordInput}
-                        maxLength={6}
-                        autoCapitalize="characters"
-                        autoCorrect="off"
-                        autoComplete="off"
-                        spellCheck="false"
-                        onChange={e => {
-                          const val = e.target.value.replace(/[Ａ-Ｚａ-ｚ０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
-                          setPasswordInput(val.toUpperCase().replace(/[^A-Z0-9]/g, ''));
-                        }}
-                        style={{ height: 72, fontSize: 32, textAlign: 'center', letterSpacing: 8, fontWeight: 900, marginBottom: 16 }}
-                      />
-                      <button onClick={loginWithPassword} className="btn btn-primary" style={{ width: '100%', height: 56 }}>接続する</button>
-                    </>
-                  )}
-                  <button onClick={() => { setShowPasswordLogin(false); setIsConnecting(false); }} style={{ background: 'none', border: 'none', color: '#9e9e9e', fontWeight: 700, marginTop: 16 }}>キャンセル</button>
-                </div>
-              )}
-            </>
-          )}
-        </motion.div>
-      </main>
-    );
-  }
-
   // Mobile Screen: Connected (or Firebase Relay ready)
-  if (isMobile && (socket?.connected || (user && !isConnecting))) {
+  if (isMobile && (socket?.connected || (user && !isConnecting && (targetServerUrl || localStorage.getItem('remote_token'))))) {
     return (
       <main style={{ minHeight: '100vh', paddingBottom: 'calc(100px + env(safe-area-inset-bottom))', padding: 16, background: '#fafafa' }}>
+        {(authError && (authError.includes('WebSocket') || authError.includes('オフライン'))) && (
+          <div style={{ position: 'fixed', top: 80, left: 16, right: 16, background: '#fff9c4', padding: '8px 16px', borderRadius: 12, fontSize: 11, fontWeight: 700, color: '#f57f17', zIndex: 100, boxShadow: '0 4px 12px rgba(0,0,0,0.05)', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>📡 Vercel制限により中継モードで動作中</span>
+            <button onClick={() => setAuthError('')} style={{ marginLeft: 'auto', background: 'none', border: 'none', fontSize: 14 }}>×</button>
+          </div>
+        )}
         <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, padding: '12px 16px', background: 'white', borderRadius: 20, boxShadow: '0 2px 10px rgba(0,0,0,0.04)', position: 'sticky', top: 0, zIndex: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <img src={user.photoURL || ''} style={{ width: 32, height: 32, borderRadius: '50%', border: `2px solid ${socket?.connected ? '#4caf50' : '#2196f3'}` }} alt="" />
@@ -1101,7 +1066,6 @@ export default function Home() {
             <button
               onClick={() => {
                 if (isSharingMobileScreen) {
-                  // 自動停止はTrack.onendedで処理される仕組み
                   showHint('⏹ 画面共有を終了してください');
                 } else {
                   startMobileSharing();
@@ -1117,40 +1081,66 @@ export default function Home() {
           </div>
         </header>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ marginBottom: 24 }}>
           <AnimatePresence mode="wait">
             {tab === 'mouse' && (
-              <motion.div key="mouse" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div className={`trackpad ${active ? 'trackpad-active' : ''}`} style={{ height: '52vh' }} onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd}>
-                  <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.05, pointerEvents: 'none' }}>
-                    <span style={{ fontSize: 100, fontWeight: 900, letterSpacing: '20px' }}>TRACKPAD</span>
-                  </div>
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} key="mouse">
+                <div
+                  className="card"
+                  style={{
+                    height: '50vh',
+                    background: 'white',
+                    borderRadius: 32,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    position: 'relative',
+                    overflow: 'hidden',
+                    boxShadow: '0 10px 40px rgba(0,0,0,0.03)',
+                    touchAction: 'none'
+                  }}
+                  onContextMenu={e => e.preventDefault()}
+                  onTouchStart={onStart}
+                  onTouchMove={onMove}
+                  onTouchEnd={onEnd}
+                >
+                  {!active && !scroll && <div style={{ color: '#e0e0e0', fontSize: 14, fontWeight: 800, textAlign: 'center' }}>TOUCHPAD<br /><span style={{ fontSize: 11, fontWeight: 500, opacity: 0.5 }}>2本指でスクロール / タップでクリック</span></div>}
+                  {scroll && <div style={{ color: '#2196f3', fontSize: 24 }}>↕️</div>}
                   {touchIndicator && (
-                    <div style={{
-                      position: 'absolute',
-                      left: touchIndicator.x,
-                      top: touchIndicator.y,
-                      width: 40,
-                      height: 40,
-                      background: 'rgba(76, 175, 80, 0.2)',
-                      borderRadius: '50%',
-                      transform: 'translate(-50%, -50%)',
-                      pointerEvents: 'none',
-                      border: '2px solid rgba(76, 175, 80, 0.4)'
-                    }} />
+                    <div style={{ position: 'absolute', left: touchIndicator.x - 20, top: touchIndicator.y - 20, width: 40, height: 40, background: 'rgba(16, 185, 129, 0.2)', border: '2px solid #10b981', borderRadius: '50%', pointerEvents: 'none' }} />
                   )}
                 </div>
-                <div className="grid-3">
-                  <button className="btn btn-secondary" style={{ height: 64, fontWeight: 800 }} onClick={() => click('left')}>左</button>
-                  <button className="btn btn-secondary" style={{ height: 64, fontWeight: 800 }} onClick={() => click('middle')}>中</button>
-                  <button className="btn btn-secondary" style={{ height: 64, fontWeight: 800 }} onClick={() => click('right')}>右</button>
+                <div className="grid-3" style={{ marginTop: 16 }}>
+                  <button className={`btn ${active ? 'btn-primary' : 'btn-secondary'}`} style={{ height: 64, borderRadius: 20 }} onTouchStart={() => { emit('mouse-toggle', { down: true, button: 'left' }); setActive(true); }} onTouchEnd={() => { emit('mouse-toggle', { down: false, button: 'left' }); setActive(false); }}>HOLD</button>
+                  <button className="btn btn-secondary" style={{ height: 64, borderRadius: 20 }} onClick={() => click('left')}>LEFT</button>
+                  <button className="btn btn-secondary" style={{ height: 64, borderRadius: 20 }} onClick={() => click('right')}>RIGHT</button>
                 </div>
               </motion.div>
             )}
 
+            {tab === 'mirror' && (
+              <motion.div key="mirror" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="card" style={{ padding: 20 }}>
+                <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 12 }}>
+                  {displays.map((d: any, i: number) => (
+                    <button key={i} onClick={() => setSelectedDisplay(i)} className={`badge ${selectedDisplay === i ? 'badge-primary' : ''}`} style={{ whiteSpace: 'nowrap' }}>🖥️ Disp {i + 1}</button>
+                  ))}
+                </div>
+                <button className="btn btn-primary" style={{ height: 60 }} onClick={() => {
+                  if (!isMirroring) {
+                    emit('start-mirroring', selectedDisplay);
+                    setIsMirroring(true);
+                    showHint('📡 ミラーリング開始');
+                  } else {
+                    emit('stop-mirroring');
+                    setIsMirroring(false);
+                  }
+                }}>{isMirroring ? '停止' : 'PC画面をミラー開始'}</button>
+                {ss && <img src={ss} style={{ width: '100%', borderRadius: 16, boxShadow: '0 10px 30px rgba(0,0,0,0.1)', marginTop: 16 }} />}
+              </motion.div>
+            )}
             {tab === 'monitor' && (
-              <motion.div key="monitor">
-                <div className="grid-2" style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                <div className="grid-2">
                   <div className="card" style={{ padding: 24, textAlign: 'center', borderBottom: '4px solid #4caf50' }}>
                     <p style={{ fontSize: 11, fontWeight: 800, color: '#9e9e9e' }}>CPU</p>
                     <p style={{ fontSize: 32, fontWeight: 900 }}>{stats.cpu}%</p>
@@ -1160,15 +1150,11 @@ export default function Home() {
                     <p style={{ fontSize: 32, fontWeight: 900 }}>{stats.mem}%</p>
                   </div>
                 </div>
-
-                <div style={{ display: 'flex', gap: 8, overflowX: 'auto', marginBottom: 16, paddingBottom: 8 }}>
+                <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8 }}>
                   {displays.map((d: any, i: number) => (
-                    <button key={i} onClick={() => { setSelectedDisplay(i); getSS(); }} className={`badge ${selectedDisplay === i ? 'badge-primary' : ''}`} style={{ whiteSpace: 'nowrap' }}>
-                      🖥️ Display {i + 1}
-                    </button>
+                    <button key={i} onClick={() => { setSelectedDisplay(i); getSS(); }} className={`badge ${selectedDisplay === i ? 'badge-primary' : ''}`} style={{ whiteSpace: 'nowrap' }}>🖥️ Display {i + 1}</button>
                   ))}
                 </div>
-
                 <div className="card" style={{ padding: 16, background: '#000', minHeight: 240, position: 'relative' }}>
                   {ss ? <img src={ss} style={{ width: '100%', borderRadius: 8 }} /> : (
                     <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1176,226 +1162,124 @@ export default function Home() {
                     </div>
                   )}
                 </div>
-              </motion.div>
+              </div>
             )}
-
-            {tab === 'mirror' && (
-              <motion.div key="mirror">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    {displays.map((d: any, i: number) => (
-                      <button key={i} onClick={() => setSelectedDisplay(i)} className={`badge ${selectedDisplay === i ? 'badge-primary' : ''}`}>
-                        {i + 1}
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    onClick={() => {
-                      if (!isMirroring) {
-                        emit('start-mirroring', selectedDisplay);
-                        setIsMirroring(true);
-                        showHint('📡 ミラーリング開始');
-                      } else {
-                        emit('stop-mirroring');
-                        setIsMirroring(false);
-                      }
-                    }}
-                    className={`btn ${isMirroring ? 'btn-danger' : 'btn-primary'}`}
-                    style={{ height: 40, fontSize: 12 }}
-                  >
-                    {isMirroring ? '停止' : '配信開始'}
-                  </button>
+            {tab === 'macro' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+                <div className="grid-3">
+                  {shortcuts.map(s => <button key={s.n} className="card" style={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }} onClick={() => macro(s)}><span style={{ fontSize: 32 }}>{s.icon}</span><span style={{ fontWeight: 800 }}>{s.n}</span></button>)}
                 </div>
-                <div
-                  className="card"
-                  style={{
-                    padding: 4,
-                    background: '#000',
-                    minHeight: '40vh',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    position: 'relative',
-                    overflow: 'hidden'
-                  }}
-                >
-                  {ss && isMirroring ? (
-                    <img
-                      src={ss}
-                      style={{
-                        width: '100%',
-                        height: 'auto',
-                        maxHeight: '70vh',
-                        objectFit: 'contain',
-                        borderRadius: 12,
-                        boxShadow: '0 0 20px rgba(0,0,0,0.5)'
-                      }}
-                    />
-                  ) : (
-                    <div style={{ textAlign: 'center', color: '#666' }}>
-                      <div style={{ fontSize: 48, marginBottom: 16 }}>📡</div>
-                      <p style={{ fontSize: 12, fontWeight: 800 }}>ミラーリングを待機中</p>
-                    </div>
-                  )}
-
-                  {isMirroring && (
-                    <div style={{ position: 'absolute', top: 12, right: 12, display: 'flex', gap: 8 }}>
-                      <div className="badge badge-success" style={{ fontSize: 8, opacity: 0.8 }}>LIVE</div>
-                    </div>
-                  )}
+                <div className="grid-5">
+                  {launchers.map(l => <button key={l.n} className="card" style={{ padding: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }} onClick={() => launch(l.q, l.n)}><span style={{ fontSize: 20 }}>{l.icon}</span><span style={{ fontSize: 10, fontWeight: 800 }}>{l.n}</span></button>)}
                 </div>
-                <p style={{ fontSize: 10, color: '#94a3b8', marginTop: 12, textAlign: 'center' }}>
-                  ※高頻度でスクリーンショットを取得して配信しています
-                </p>
-              </motion.div>
+              </div>
             )}
-
+            {tab === 'keys' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <textarea className="textarea" style={{ height: 160, fontSize: 16 }} placeholder="ここに文字を入力してPCへ送信..." value={text} onChange={e => setText(e.target.value)} />
+                <button className="btn btn-primary" style={{ height: 60, fontSize: 18 }} onClick={() => { emit('type-string', text); setText(''); }}>PCへ送信</button>
+                <div className="grid-4">
+                  {['enter', 'backspace', 'tab', 'escape'].map(k => <button key={k} className="btn btn-secondary" onClick={() => keyTap(k)}>{k.toUpperCase()}</button>)}
+                </div>
+              </div>
+            )}
+            {tab === 'media' && (
+              <div className="card" style={{ padding: 32 }}>
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 32, marginBottom: 32 }}>
+                  <button className="btn btn-secondary" style={{ width: 80, height: 80, fontSize: 32, borderRadius: 40 }} onClick={() => media('audio_prev')}>⏮</button>
+                  <button className="btn btn-primary" style={{ width: 100, height: 100, fontSize: 40, borderRadius: 50 }} onClick={() => media('audio_play')}>⏯</button>
+                  <button className="btn btn-secondary" style={{ width: 80, height: 80, fontSize: 32, borderRadius: 40 }} onClick={() => media('audio_next')}>⏭</button>
+                </div>
+                <div className="grid-3">
+                  <button className="btn btn-secondary" style={{ height: 60, fontSize: 24 }} onClick={() => media('audio_vol_down')}>🔉</button>
+                  <button className="btn btn-secondary" style={{ height: 60, fontSize: 24 }} onClick={() => media('audio_mute')}>🔇</button>
+                  <button className="btn btn-secondary" style={{ height: 60, fontSize: 24 }} onClick={() => media('audio_vol_up')}>🔊</button>
+                </div>
+              </div>
+            )}
+            {tab === 'num' && (
+              <div className="card" style={{ padding: 24, maxWidth: 300, margin: '0 auto' }}>
+                <div className="grid-3" style={{ gap: 12 }}>
+                  {['7', '8', '9', '4', '5', '6', '1', '2', '3', '0', '.', 'enter'].map(k => (
+                    <button key={k} className="btn btn-secondary" style={{ height: 64, fontSize: 24, fontWeight: 900 }} onClick={() => keyTap(k === 'enter' ? 'enter' : k)}>{k.toUpperCase()}</button>
+                  ))}
+                  <button className="btn btn-danger" style={{ height: 64, gridColumn: 'span 3' }} onClick={() => keyTap('backspace')}>DEL</button>
+                </div>
+              </div>
+            )}
             {tab === 'power' && (
-              <motion.div key="power" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 <div className="grid-2">
                   <button className="card" style={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }} onClick={() => emit('system-control', 'sleep')}>
                     <span style={{ fontSize: 32 }}>🌙</span>
-                    <span style={{ fontSize: 13, fontWeight: 800 }}>スリープ</span>
+                    <span style={{ fontWeight: 800 }}>スリープ</span>
                   </button>
                   <button className="card" style={{ padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }} onClick={() => emit('system-control', 'lock')}>
                     <span style={{ fontSize: 32 }}>🔒</span>
-                    <span style={{ fontSize: 13, fontWeight: 800 }}>画面をロック</span>
+                    <span style={{ fontWeight: 800 }}>ロック</span>
                   </button>
                 </div>
-
                 <div className="card" style={{ padding: 24 }}>
-                  <h3 style={{ fontSize: 14, fontWeight: 900, marginBottom: 16, color: '#64748b' }}>画面設定</h3>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <button
-                      className="btn btn-primary"
-                      style={{ fontSize: 13, height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, background: '#1e293b' }}
+                  <h4 style={{ fontSize: 13, fontWeight: 900, marginBottom: 16 }}>システム</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <button className="btn btn-secondary" style={{ height: 52, justifyContent: 'flex-start', padding: '0 20px', gap: 12 }}
                       onClick={() => emit('system-control', 'display-settings')}
                     >
-                      <span>🖥️</span> PCの配置設定を開く
+                      <span style={{ fontSize: 18 }}>🖥️</span>
+                      <span style={{ fontWeight: 800 }}>ディスプレイ設定</span>
                     </button>
-                    <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '16px', border: '1px solid #f1f5f9' }}>
-                      <p style={{ fontSize: '11px', color: '#64748b', lineHeight: 1.6, fontWeight: 600 }}>
-                        スマホを第2モニターにするには：<br />
-                        1. PC側で「配置」を『拡張』にする<br />
-                        2. ミラーリングタブでサブ画面を選ぶ
-                      </p>
-                    </div>
                   </div>
                 </div>
-
                 <div className="card" style={{ padding: 24 }}>
-                  <h3 style={{ fontSize: 14, fontWeight: 900, marginBottom: 16, color: '#64748b' }}>音量・明るさ</h3>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                    <div className="grid-3" style={{ gap: 8 }}>
-                      <button className="btn btn-secondary" style={{ height: 60, fontSize: 20 }} onClick={() => emit('system-control', 'volume-down')}>🔉</button>
-                      <button className="btn btn-secondary" style={{ height: 60, fontSize: 20 }} onClick={() => emit('system-control', 'mute')}>🔇</button>
-                      <button className="btn btn-secondary" style={{ height: 60, fontSize: 20 }} onClick={() => emit('system-control', 'volume-up')}>🔊</button>
-                    </div>
-                    <div className="grid-2" style={{ gap: 8 }}>
-                      <button className="btn btn-secondary" style={{ height: 52, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }} onClick={() => emit('system-control', 'brightness-down')}>
-                        <span style={{ fontSize: 18 }}>🔅</span>
-                        <span>画面を暗く</span>
-                      </button>
-                      <button className="btn btn-secondary" style={{ height: 52, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }} onClick={() => emit('system-control', 'brightness-up')}>
-                        <span style={{ fontSize: 18 }}>🔆</span>
-                        <span>画面を明るく</span>
-                      </button>
-                    </div>
+                  <h4 style={{ fontSize: 13, fontWeight: 900, marginBottom: 16 }}>音量・輝度</h4>
+                  <div className="grid-3" style={{ marginBottom: 16 }}>
+                    <button className="btn btn-secondary" style={{ height: 60, fontSize: 20 }} onClick={() => emit('system-control', 'volume-down')}>🔉</button>
+                    <button className="btn btn-secondary" style={{ height: 60, fontSize: 20 }} onClick={() => emit('system-control', 'mute')}>🔇</button>
+                    <button className="btn btn-secondary" style={{ height: 60, fontSize: 20 }} onClick={() => emit('system-control', 'volume-up')}>🔊</button>
+                  </div>
+                  <div className="grid-2">
+                    <button className="btn btn-secondary" style={{ height: 52, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }} onClick={() => emit('system-control', 'brightness-down')}>
+                      <span>🔅</span> 輝度下げる
+                    </button>
+                    <button className="btn btn-secondary" style={{ height: 52, fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }} onClick={() => emit('system-control', 'brightness-up')}>
+                      <span>🔆</span> 輝度上げる
+                    </button>
                   </div>
                 </div>
-              </motion.div>
+              </div>
             )}
-
             {tab === 'draw' && (
-              <motion.div key="draw" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div className="badge" style={{ background: '#e8f5e9', color: '#2e7d32', padding: 12 }}>お絵描き・ドラッグ固定モード</div>
-                <div className={`trackpad ${active ? 'trackpad-active' : ''}`} style={{ height: '55vh', border: '3px dashed #4caf50' }} onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd} />
-                <button className="btn btn-danger" style={{ height: 60 }} onClick={() => keyTap('z', ['command'])}>UNDO</button>
-              </motion.div>
+              <div className="card" style={{ padding: 12, borderRadius: 24 }}>
+                <div style={{ height: '60vh', background: '#f1f5f9', borderRadius: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'none', position: 'relative', overflow: 'hidden' }}
+                  onContextMenu={e => e.preventDefault()}
+                  onTouchStart={onStart}
+                  onTouchMove={onMove}
+                  onTouchEnd={onEnd}
+                >
+                  <p style={{ color: '#94a3b8', fontSize: 13, fontWeight: 800 }}>DRAG TO DRAW</p>
+                  {touchIndicator && (
+                    <div style={{ position: 'absolute', left: touchIndicator.x - 10, top: touchIndicator.y - 10, width: 20, height: 20, background: '#f43f5e', borderRadius: '50%', pointerEvents: 'none' }} />
+                  )}
+                </div>
+              </div>
             )}
-
-            {tab === 'keys' && (
-              <motion.div key="keys">
-                <div className="card" style={{ padding: 16, marginBottom: 16 }}>
-                  <textarea className="textarea" placeholder="テキストを送信..." value={text} onChange={e => setText(e.target.value)} style={{ height: 100, marginBottom: 12 }} />
-                  <button className="btn btn-primary" style={{ width: '100%', height: 52 }} onClick={() => { emit('type-string', text); setText(''); }}>送信</button>
-                </div>
-                <div className="grid-4">
-                  {['enter', 'backspace', 'tab', 'escape', 'space', 'f1', 'f5', 'f11'].map(k => (
-                    <button key={k} className="btn btn-secondary" style={{ fontSize: 11, padding: '16px 4px' }} onClick={() => keyTap(k)}>{k.toUpperCase()}</button>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-
-            {tab === 'macro' && (
-              <motion.div key="macro">
-                <div className="card" style={{ padding: 16, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <span style={{ fontSize: 20 }}>🔍</span>
-                  <input
-                    className="input"
-                    style={{ border: 'none', background: 'transparent', padding: 0 }}
-                    placeholder="アプリを検索..."
-                    value={appSearch}
-                    onChange={e => setAppSearch(e.target.value)}
-                  />
-                </div>
-
-                <h4 style={{ fontSize: 13, fontWeight: 900, marginBottom: 12, color: '#94a3b8' }}>SHORTCUTS</h4>
-                <div className="grid-3" style={{ marginBottom: 32 }}>
-                  {shortcuts.map(s => (
-                    <button key={s.n} className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }} onClick={() => macro(s)}>
-                      <span style={{ fontSize: 32 }}>{s.icon}</span>
-                      <span style={{ fontSize: 11, fontWeight: 800 }}>{s.n}</span>
-                    </button>
-                  ))}
-                </div>
-
-                <h4 style={{ fontSize: 13, fontWeight: 900, marginBottom: 12, color: '#94a3b8' }}>LAUNCHERS</h4>
-                <div className="grid-3" style={{ gap: 12 }}>
-                  {launchers.filter(l => l.n.toLowerCase().includes(appSearch.toLowerCase())).map(l => (
-                    <button key={l.n} className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }} onClick={() => launch(l.q, l.n)}>
-                      <span style={{ fontSize: 32 }}>{l.icon}</span>
-                      <span style={{ fontSize: 11, fontWeight: 800 }}>{l.n}</span>
-                    </button>
-                  ))}
-                </div>
-              </motion.div>
-            )}
-
-            {tab === 'num' && (
-              <motion.div key="num" className="grid-3" style={{ width: '100%', maxWidth: 300, margin: '0 auto' }}>
-                {[7, 8, 9, 4, 5, 6, 1, 2, 3, 0, '.', 'enter'].map(n => (
-                  <button key={n} className="btn btn-secondary" style={{ height: 80, fontSize: 24 }} onClick={() => keyTap(n.toString())}>{n}</button>
-                ))}
-              </motion.div>
-            )}
-
-            {tab === 'media' && (
-              <motion.div key="media" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 40 }}>
-                <div style={{ display: 'flex', gap: 20 }}>
-                  <button onClick={() => media('audio_prev')} className="btn btn-secondary" style={{ width: 70, height: 70, fontSize: 32 }}>⏮️</button>
-                  <button onClick={() => keyTap('space')} className="btn btn-primary" style={{ width: 100, height: 100, fontSize: 48 }}>⏯️</button>
-                  <button onClick={() => media('audio_next')} className="btn btn-secondary" style={{ width: 70, height: 70, fontSize: 32 }}>⏭️</button>
-                </div>
-                <div className="grid-3" style={{ width: '100%' }}>
-                  <button className="btn btn-secondary" onClick={() => media('audio_vol_down')}>🔉</button>
-                  <button className="btn btn-secondary" onClick={() => media('audio_mute')}>🔇</button>
-                  <button className="btn btn-secondary" onClick={() => media('audio_vol_up')}>🔊</button>
-                </div>
-              </motion.div>
-            )}
-
             {tab === 'sync' && (
-              <motion.div key="sync">
-                <textarea className="textarea" style={{ height: 240, marginBottom: 16 }} value={clipboard} onChange={e => { setClipboard(e.target.value); emit('sync-clipboard', e.target.value); }} />
-                <div className="grid-2">
-                  <button className="btn btn-primary" onClick={() => navigator.clipboard.writeText(clipboard)}>コピー</button>
-                  <button className="btn btn-secondary" onClick={() => navigator.clipboard.readText().then(t => { setClipboard(t); })}>取得</button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                <div className="card" style={{ padding: 24 }}>
+                  <h4 style={{ fontSize: 14, fontWeight: 900, marginBottom: 16 }}>クリップボード</h4>
+                  <textarea className="textarea" style={{ height: 240, marginBottom: 16 }} value={clipboard} onChange={e => { setClipboard(e.target.value); emit('sync-clipboard', e.target.value); }} />
+                  <div className="grid-2">
+                    <button className="btn btn-secondary" onClick={() => emit('get-clipboard')}>取得</button>
+                    <button className="btn btn-primary" onClick={() => emit('sync-clipboard', clipboard)}>送信</button>
+                  </div>
                 </div>
-              </motion.div>
+                <div className="card" style={{ padding: 24 }}>
+                  <h4 style={{ fontSize: 14, fontWeight: 900, marginBottom: 16 }}>URLを開く</h4>
+                  <input type="text" className="input" placeholder="https://..." value={text} onChange={e => setText(e.target.value)} style={{ marginBottom: 16 }} />
+                  <button className="btn btn-primary" style={{ width: '100%', height: 52 }} onClick={() => { emit('open-path', text); setText(''); }}>送信</button>
+                </div>
+              </div>
             )}
-
             {tab === 'config' && (
               <motion.div key="config" className="card" style={{ padding: 24 }}>
                 <div style={{ marginBottom: 24 }}>
@@ -1462,25 +1346,98 @@ export default function Home() {
                   { id: 'sync', icon: '📋', n: '同期' },
                   { id: 'config', icon: '⚙️', n: '設定' },
                 ].map(t => (
-                    <button key={t.id} className="more-menu-item" onClick={() => { setTab(t.id as Tab); setShowMoreMenu(false); }}>
-                        <div style={{ fontSize: 32 }}>{t.icon}</div>
-                        <span style={{ fontSize: 11, fontWeight: 800 }}>{t.n}</span>
-                    </button>
+                  <button key={t.id} className="more-menu-item" onClick={() => { setTab(t.id as Tab); setShowMoreMenu(false); }}>
+                    <div style={{ fontSize: 32 }}>{t.icon}</div>
+                    <span style={{ fontSize: 11, fontWeight: 800 }}>{t.n}</span>
+                  </button>
                 ))}
-              </motion.div >
-            </motion.div >
+              </motion.div>
+            </motion.div>
           )}
-        </AnimatePresence >
+        </AnimatePresence>
 
-    <AnimatePresence>
-        {hint && (
+        <AnimatePresence>
+          {hint && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} style={{ position: 'fixed', bottom: 100, left: 16, right: 16, background: '#212121', color: '#fff', padding: '14px 24px', borderRadius: 16, textAlign: 'center', zIndex: 100, fontWeight: 800 }}>{hint.toUpperCase()}</motion.div>
-        )}
-    </AnimatePresence>
-      </main >
+          )}
+        </AnimatePresence>
+      </main>
     );
   }
 
-// もしここに来る場合はPC版のメインUIを返す（すでに上でreturn済みのはずだが念のため）
-return null;
+  // Mobile Screen: Unconnected / Connecting
+  if (isMobile) {
+    return (
+      <main style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, background: '#fafafa' }}>
+        <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} style={{ width: '100%', maxWidth: 360, textAlign: 'center' }}>
+          {showScanner ? (
+            <div className="card" style={{ padding: 24, borderRadius: 32, overflow: 'hidden' }}>
+              <h3 style={{ marginBottom: 20, fontWeight: 900, fontSize: 18 }}>QRコードを読み取る</h3>
+              <div id="reader" style={{ width: '100%', borderRadius: 16, overflow: 'hidden', background: '#000' }}></div>
+              <div style={{ marginTop: 20, color: '#64748b', fontSize: 13, fontWeight: 600 }}>
+                PC画面のQRコードを枠内に収めてください
+              </div>
+              <button
+                onClick={() => setShowScanner(false)}
+                className="btn btn-secondary"
+                style={{ width: '100%', marginTop: 24, height: 56, borderRadius: 16 }}
+              >
+                キャンセル
+              </button>
+            </div>
+          ) : (
+            <>
+              <div style={{ width: 88, height: 88, borderRadius: 24, background: '#e3f2fd', color: '#1976d2', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 32px' }}>
+                <img src={user?.photoURL || ''} style={{ width: '100%', borderRadius: 24 }} alt="" />
+              </div>
+              <h2 style={{ fontSize: 24, fontWeight: 900, marginBottom: 16 }}>こんにちは、{user?.displayName?.split(' ')[0]}さん</h2>
+              <p style={{ color: '#616161', marginBottom: 32, lineHeight: 1.6, fontSize: 14, padding: '0 20px' }}>
+                接続を開始するには、PC画面に表示されているQRコードをよみ取るか、パスワードを入力してください。
+              </p>
+              {authError && <div className="badge badge-danger" style={{ marginBottom: 24, padding: '10px 16px' }}>{authError}</div>}
+
+              {!showPasswordLogin ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <button onClick={() => setShowScanner(true)} className="btn btn-primary" style={{ height: 64, fontSize: 17 }}>スキャナーを起動</button>
+                  <button onClick={() => setShowPasswordLogin(true)} className="btn btn-secondary" style={{ height: 60 }}>パスワードで入力</button>
+                </div>
+              ) : (
+                <div className="card" style={{ padding: 24 }}>
+                  {isConnecting ? (
+                    <div style={{ padding: '20px 0' }}>
+                      <div className="animate-spin" style={{ width: 40, height: 40, border: '4px solid #f1f5f9', borderTopColor: '#10b981', borderRadius: '50%', margin: '0 auto 20px' }}></div>
+                      <p style={{ fontWeight: 800, color: '#10b981' }}>PCに接続中...</p>
+                    </div>
+                  ) : (
+                    <>
+                      <input
+                        type="text"
+                        className="input"
+                        placeholder="ABC123"
+                        value={passwordInput}
+                        maxLength={6}
+                        autoCapitalize="characters"
+                        autoCorrect="off"
+                        autoComplete="off"
+                        spellCheck="false"
+                        onChange={e => {
+                          const val = e.target.value.replace(/[Ａ-Ｚａ-ｚ０-９]/g, (s) => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+                          setPasswordInput(val.toUpperCase().replace(/[^A-Z0-9]/g, ''));
+                        }}
+                        style={{ height: 72, fontSize: 32, textAlign: 'center', letterSpacing: 8, fontWeight: 900, marginBottom: 16 }}
+                      />
+                      <button onClick={loginWithPassword} className="btn btn-primary" style={{ width: '100%', height: 56 }}>接続する</button>
+                    </>
+                  )}
+                  <button onClick={() => { setShowPasswordLogin(false); setIsConnecting(false); }} style={{ background: 'none', border: 'none', color: '#9e9e9e', fontWeight: 700, marginTop: 16 }}>キャンセル</button>
+                </div>
+              )}
+            </>
+          )}
+        </motion.div>
+      </main>
+    );
+  }
+
+  return null;
 }
