@@ -6,7 +6,7 @@ import QRCode from 'qrcode';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { auth, googleProvider } from '../lib/firebase';
-import { signInWithPopup, signInWithRedirect, signOut as firebaseSignOut, onAuthStateChanged, User } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect, getRedirectResult, signOut as firebaseSignOut, onAuthStateChanged, User } from 'firebase/auth';
 
 type Tab = 'mouse' | 'keys' | 'draw' | 'macro' | 'media' | 'monitor' | 'mirror' | 'num' | 'power' | 'sync' | 'config';
 
@@ -45,6 +45,7 @@ export default function Home() {
   const [appSearch, setAppSearch] = useState('');
   const [touchIndicator, setTouchIndicator] = useState<{ x: number, y: number } | null>(null);
   const [targetServerUrl, setTargetServerUrl] = useState<string>('');
+  const [tick, setTick] = useState(0);
 
   const last = useRef({ x: 0, y: 0 });
   const fingers = useRef(0);
@@ -69,6 +70,14 @@ export default function Home() {
   ];
 
   useEffect(() => {
+    // リダイレクト後の結果を確認
+    getRedirectResult(auth).catch((e) => {
+      console.error("Redirect auth error:", e);
+      if (e.code !== 'auth/popup-closed-by-user') {
+        setAuthError("ログイン中にエラーが発生しました。設定を確認してください。");
+      }
+    });
+
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setAuthLoading(false);
@@ -93,12 +102,12 @@ export default function Home() {
       if (token) {
         if (params.get('token')) localStorage.setItem('remote_token', params.get('token')!);
         init(token);
-      } else if (!mobile) {
+      } else if (!mobile && !qrCode) {
         refresh();
         init('pc-internal');
       }
     }
-  }, [user]);
+  }, [user, qrCode]);
 
   useEffect(() => {
     if (showScanner) {
@@ -139,7 +148,7 @@ export default function Home() {
   useEffect(() => {
     if (connectionTime) {
       const interval = setInterval(() => {
-        setConnectionTime(new Date(connectionTime));
+        setTick(t => t + 1);
       }, 1000);
       return () => clearInterval(interval);
     }
@@ -206,7 +215,10 @@ export default function Home() {
       } else if (data.type === 'alert') {
         alert("PCからのメッセージ: " + data.msg);
       } else if (data.type === 'open-url') {
-        window.open(data.url, '_blank');
+        const newWin = window.open(data.url, '_blank');
+        if (!newWin || newWin.closed || typeof newWin.closed === 'undefined') {
+          alert("⚠️ ブラウザによって外部サイトの表示がブロックされました。設定からこのサイトの「ポップアップとリダイレクト」を許可してください。");
+        }
       } else if (data.type === 'ping') {
         const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
         audio.play().catch(e => console.error("Audio error:", e));
@@ -233,8 +245,7 @@ export default function Home() {
       const isAuthError = msg.includes('AUTH') || msg.includes('FAILED') || msg.includes('TOKEN') || msg.includes('EXPIRED') || msg.includes('RETRY');
 
       if (token === 'pc-internal') {
-        console.warn("[Socket] PC-side auth failed (internal). Retrying refresh...");
-        refresh();
+        console.warn("[Socket] PC-side connection failed. Check server status.");
       } else if (isAuthError) {
         s.close();
         localStorage.removeItem('remote_token');
@@ -496,13 +507,35 @@ export default function Home() {
     const m = Math.floor(diff / 60);
     const s = diff % 60;
     return `${m}分 ${s}秒`;
+    // tickを利用して再レンダリングをトリガー
+    console.debug('Timer tick:', tick);
   };
 
-  const handleSignIn = () => {
-    if (isMobile) {
-      signInWithRedirect(auth, googleProvider);
-    } else {
-      signInWithPopup(auth, googleProvider);
+  const handleSignIn = async () => {
+    setAuthError('');
+
+    // セキュリティ環境のチェック
+    if (!window.isSecureContext && window.location.hostname !== 'localhost') {
+      alert("⚠️ セキュリティ保護されていない接続(HTTP)からはログインできません。HTTPSのURL（Vercelやngrokのhttps://...）を使用してください。");
+      return;
+    }
+
+    try {
+      // まずはポップアップを試みる（デスクトップや一部のモバイルブラウザで快適）
+      await signInWithPopup(auth, googleProvider);
+    } catch (e: any) {
+      console.log("Login error code:", e.code);
+      // ポップアップがブロックされた、または特定のモバイル環境の場合はリダイレクトを試みる
+      if (e.code === 'auth/popup-blocked' || e.code === 'auth/cancelled-popup-request' || isMobile) {
+        try {
+          await signInWithRedirect(auth, googleProvider);
+        } catch (re: any) {
+          console.error("Redirect login error:", re);
+          alert("ログインを開始できませんでした。ブラウザの設定でポップアップとリダイレクトを許可してください。");
+        }
+      } else if (e.code !== 'auth/popup-closed-by-user') {
+        setAuthError(`エラーが発生しました: ${e.message}`);
+      }
     }
   };
   const handleSignOut = () => firebaseSignOut(auth);
@@ -597,6 +630,11 @@ export default function Home() {
             <img src="https://www.google.com/favicon.ico" style={{ width: '20px', height: '20px', background: 'white', borderRadius: '4px', padding: '2px' }} alt="G" />
             <span style={{ fontWeight: 700, fontSize: '16px' }}>Googleでログイン</span>
           </button>
+
+          <p style={{ marginTop: '12px', fontSize: '10px', color: '#64748b', fontWeight: 600 }}>
+            ※ ログイン画面が開かない場合は、ブラウザの設定で<br />
+            <strong>「ポップアップ」</strong>を許可してください。
+          </p>
 
           <p style={{ marginTop: '32px', fontSize: '11px', color: '#94a3b8', fontWeight: 500, padding: '0 16px', lineHeight: 1.6 }}>
             ログインすることで、Googleアカウントに紐付けられたデバイス間での安全なリモート接続が有効になります。
